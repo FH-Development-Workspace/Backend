@@ -1,0 +1,1238 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+  PENDING
+  DELETED
+}
+
+enum ProductStatus {
+  ACTIVE
+  BETA
+  DEVELOPMENT
+  ARCHIVED
+  DISCONTINUED
+}
+
+enum VersionStatus {
+  DRAFT
+  RELEASED
+  DEPRECATED
+}
+
+enum FileVisibility {
+  PUBLIC
+  AUTHENTICATED
+  LICENSED
+  PRIVATE
+}
+
+enum LicenseStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  SUSPENDED
+}
+
+enum LicenseType {
+  TRIAL
+  PERSONAL
+  COMMERCIAL
+  ENTERPRISE
+  LIFETIME
+}
+
+enum DownloadStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+  SCHEDULED
+  ARCHIVED
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_FOR_USER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum ContactStatus {
+  NEW
+  READ
+  REPLIED
+  ARCHIVED
+  SPAM
+}
+
+enum JobStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+  ARCHIVED
+}
+
+enum ApplicationStatus {
+  NEW
+  SCREENING
+  SHORTLISTED
+  INTERVIEW
+  OFFER
+  REJECTED
+  HIRED
+}
+
+enum RoadmapStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum NotificationType {
+  SYSTEM
+  SECURITY
+  SUPPORT
+  PRODUCT
+  LICENSE
+  ACCOUNT
+  COMPANY
+}
+
+enum ChangelogItemType {
+  NEW
+  IMPROVED
+  FIXED
+  SECURITY
+  BREAKING
+}
+
+enum AnalyticsEventType {
+  PAGE_VIEW
+  PRODUCT_VIEW
+  DOWNLOAD
+  LICENSE_EVENT
+  SEARCH
+  BLOG_VIEW
+  DOC_VIEW
+  CONTACT
+  SUPPORT
+  LOGIN
+  REGISTER
+}
+
+enum ServiceStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+// ─── User System ─────────────────────────────────────────────────────────────
+
+model User {
+  id            String     @id @default(uuid())
+  username      String     @unique
+  email         String     @unique
+  passwordHash  String
+  emailVerified Boolean    @default(false)
+  status        UserStatus @default(PENDING)
+  lastLoginAt   DateTime?
+  deletedAt     DateTime?
+  deletedBy     String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  profile              Profile?
+  roles                UserRole[]
+  sessions             Session[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens  PasswordResetToken[]
+  downloads            Download[]
+  downloadReceipts     DownloadReceipt[]
+  licenses             License[]
+  reviews              Review[]
+  supportTickets       SupportTicket[]
+  supportMessages      SupportMessage[]
+  supportAssignments   SupportAssignment[]
+  jobApplications      JobApplication[]
+  notifications        Notification[]
+  notificationPrefs    NotificationPreference[]
+  auditLogs            AuditLog[]
+  blogPosts            BlogPost[]             @relation("BlogAuthor")
+  blogAuthor           BlogAuthor?
+
+  @@index([email])
+  @@index([username])
+  @@index([status])
+}
+
+model Profile {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  firstName   String?
+  lastName    String?
+  displayName String?
+  avatar      String?
+  bio         String?
+  phone       String?
+  company     String?
+  website     String?
+  location    String?
+  timezone    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  department  String?
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       UserRole[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  resource    String
+  action      String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles RolePermission[]
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  refreshToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([refreshToken])
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+}
+
+// ─── Product System ────────────────────────────────────────────────────────────
+
+model ProductCategory {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  description String?
+  displayOrder Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+
+  @@index([slug])
+}
+
+model Product {
+  id           String        @id @default(uuid())
+  name         String
+  slug         String        @unique
+  tagline      String?
+  description  String?
+  longDescription String?    @db.Text
+  status       ProductStatus @default(DEVELOPMENT)
+  featured     Boolean       @default(false)
+  published    Boolean       @default(false)
+  categoryId   String?
+  icon         String?
+  coverImage   String?
+  websiteUrl   String?
+  metaTitle    String?
+  metaDescription String?
+  deletedAt    DateTime?
+  deletedBy    String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  category     ProductCategory?  @relation(fields: [categoryId], references: [id])
+  technologies ProductTechnology[]
+  features     ProductFeature[]
+  screenshots  ProductScreenshot[]
+  versions     ProductVersion[]
+  files        ProductFile[]
+  reviews      Review[]
+  downloads    Download[]
+  licenses     License[]
+
+  @@index([slug])
+  @@index([status])
+  @@index([published])
+}
+
+model ProductTechnology {
+  id        String   @id @default(uuid())
+  productId String
+  name      String
+  icon      String?
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model ProductFeature {
+  id          String   @id @default(uuid())
+  productId   String
+  title       String
+  description String?
+  displayOrder Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model ProductScreenshot {
+  id           String   @id @default(uuid())
+  productId    String
+  url          String
+  storageKey   String?
+  caption      String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model ProductVersion {
+  id                  String        @id @default(uuid())
+  productId           String
+  version             String
+  releaseDate         DateTime?
+  releaseNotes        String?       @db.Text
+  status              VersionStatus @default(DRAFT)
+  minimumRequirements String?       @db.Text
+  supportedPlatforms  String[]
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  product Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  files   ProductFile[]
+  downloads Download[]
+
+  @@unique([productId, version])
+  @@index([productId])
+  @@index([version])
+}
+
+model ProductFile {
+  id         String         @id @default(uuid())
+  productId  String
+  versionId  String?
+  fileName   String
+  storageKey String
+  fileSize   Int
+  mimeType   String
+  checksum   String?
+  visibility FileVisibility @default(AUTHENTICATED)
+  platform   String?
+  archived   Boolean        @default(false)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  product  Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  version  ProductVersion? @relation(fields: [versionId], references: [id])
+  downloads Download[]
+
+  @@index([productId])
+  @@index([versionId])
+}
+
+// ─── Downloads ─────────────────────────────────────────────────────────────────
+
+model Download {
+  id        String         @id @default(uuid())
+  userId    String
+  productId String
+  versionId String?
+  fileId    String
+  status    DownloadStatus @default(PENDING)
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  user    User            @relation(fields: [userId], references: [id])
+  product Product         @relation(fields: [productId], references: [id])
+  version ProductVersion? @relation(fields: [versionId], references: [id])
+  file    ProductFile     @relation(fields: [fileId], references: [id])
+  receipt DownloadReceipt?
+
+  @@index([userId])
+  @@index([productId])
+  @@index([fileId])
+}
+
+model DownloadReceipt {
+  id            String         @id @default(uuid())
+  receiptNumber String         @unique
+  userId        String
+  downloadId    String         @unique
+  productId     String
+  versionId     String?
+  fileId        String
+  status        DownloadStatus @default(COMPLETED)
+  createdAt     DateTime       @default(now())
+
+  user     User     @relation(fields: [userId], references: [id])
+  download Download @relation(fields: [downloadId], references: [id])
+
+  @@index([userId])
+  @@index([receiptNumber])
+}
+
+// ─── Licensing ───────────────────────────────────────────────────────────────────
+
+model License {
+  id               String        @id @default(uuid())
+  licenseKey       String        @unique
+  productId        String
+  userId           String
+  type             LicenseType   @default(PERSONAL)
+  status           LicenseStatus @default(ACTIVE)
+  issuedAt         DateTime      @default(now())
+  expiresAt        DateTime?
+  activationLimit  Int           @default(1)
+  activationCount  Int           @default(0)
+  notes            String?
+  deletedAt        DateTime?
+  deletedBy        String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  product     Product            @relation(fields: [productId], references: [id])
+  user        User               @relation(fields: [userId], references: [id])
+  activations LicenseActivation[]
+  events      LicenseEvent[]
+
+  @@index([licenseKey])
+  @@index([userId])
+  @@index([productId])
+  @@index([status])
+}
+
+model LicenseActivation {
+  id           String   @id @default(uuid())
+  licenseId    String
+  machineId    String
+  machineName  String?
+  ipAddress    String?
+  activatedAt  DateTime @default(now())
+  deactivatedAt DateTime?
+  isActive     Boolean  @default(true)
+
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@index([licenseId])
+}
+
+model LicenseEvent {
+  id        String   @id @default(uuid())
+  licenseId String
+  event     String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@index([licenseId])
+}
+
+// ─── Services ────────────────────────────────────────────────────────────────────
+
+model ServiceCategory {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  description  String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  services Service[]
+}
+
+model Service {
+  id          String        @id @default(uuid())
+  name        String
+  slug        String        @unique
+  tagline     String?
+  description String?       @db.Text
+  status      ServiceStatus @default(ACTIVE)
+  featured    Boolean       @default(false)
+  published   Boolean       @default(false)
+  categoryId  String?
+  icon        String?
+  coverImage  String?
+  metaTitle   String?
+  metaDescription String?
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  category ServiceCategory? @relation(fields: [categoryId], references: [id])
+  features ServiceFeature[]
+
+  @@index([slug])
+  @@index([published])
+}
+
+model ServiceFeature {
+  id           String   @id @default(uuid())
+  serviceId    String
+  title        String
+  description  String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId])
+}
+
+// ─── Projects ────────────────────────────────────────────────────────────────────
+
+model ProjectCategory {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  description  String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  projects Project[]
+}
+
+model Project {
+  id          String        @id @default(uuid())
+  name        String
+  slug        String        @unique
+  description String?       @db.Text
+  client      String?
+  status      ContentStatus @default(DRAFT)
+  featured    Boolean       @default(false)
+  categoryId  String?
+  coverImage  String?
+  projectUrl  String?
+  startDate   DateTime?
+  endDate     DateTime?
+  deletedAt   DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  category     ProjectCategory?   @relation(fields: [categoryId], references: [id])
+  technologies ProjectTechnology[]
+  images       ProjectImage[]
+
+  @@index([slug])
+  @@index([status])
+}
+
+model ProjectTechnology {
+  id        String   @id @default(uuid())
+  projectId String
+  name      String
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model ProjectImage {
+  id           String   @id @default(uuid())
+  projectId    String
+  url          String
+  storageKey   String?
+  caption      String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+// ─── Blog CMS ────────────────────────────────────────────────────────────────────
+
+model BlogCategory {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  description  String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  posts BlogPost[]
+}
+
+model BlogTag {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  posts BlogPostTag[]
+}
+
+model BlogAuthor {
+  id        String   @id @default(uuid())
+  userId    String?  @unique
+  name      String
+  bio       String?
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User?      @relation(fields: [userId], references: [id])
+  posts BlogPost[]
+}
+
+model BlogPost {
+  id              String        @id @default(uuid())
+  title           String
+  slug            String        @unique
+  excerpt         String?
+  content         String        @db.Text
+  status          ContentStatus @default(DRAFT)
+  featured        Boolean       @default(false)
+  featuredImage   String?
+  categoryId      String?
+  authorId        String?
+  authorUserId    String?
+  metaTitle       String?
+  metaDescription String?
+  publishedAt     DateTime?
+  scheduledAt     DateTime?
+  deletedAt       DateTime?
+  deletedBy       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  category   BlogCategory? @relation(fields: [categoryId], references: [id])
+  author     BlogAuthor?   @relation(fields: [authorId], references: [id])
+  authorUser User?         @relation("BlogAuthor", fields: [authorUserId], references: [id])
+  tags       BlogPostTag[]
+
+  @@index([slug])
+  @@index([status])
+}
+
+model BlogPostTag {
+  id     String @id @default(uuid())
+  postId String
+  tagId  String
+
+  post BlogPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag  BlogTag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, tagId])
+}
+
+// ─── Documentation ───────────────────────────────────────────────────────────────
+
+model DocumentationCategory {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  description  String?
+  displayOrder Int      @default(0)
+  parentId     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  parent   DocumentationCategory?  @relation("DocCategoryTree", fields: [parentId], references: [id])
+  children DocumentationCategory[] @relation("DocCategoryTree")
+  articles DocumentationArticle[]
+
+  @@index([slug])
+}
+
+model DocumentationArticle {
+  id              String        @id @default(uuid())
+  title           String
+  slug            String        @unique
+  content         String        @db.Text
+  status          ContentStatus @default(DRAFT)
+  categoryId      String?
+  displayOrder    Int           @default(0)
+  metaTitle       String?
+  metaDescription String?
+  publishedAt     DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  category DocumentationCategory? @relation(fields: [categoryId], references: [id])
+  versions DocumentationVersion[]
+
+  @@index([slug])
+  @@index([status])
+}
+
+model DocumentationVersion {
+  id        String   @id @default(uuid())
+  articleId String
+  version   String
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  article DocumentationArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+}
+
+// ─── Changelog ───────────────────────────────────────────────────────────────────
+
+model ChangelogRelease {
+  id           String        @id @default(uuid())
+  version      String        @unique
+  title        String?
+  releaseDate  DateTime?
+  status       ContentStatus @default(DRAFT)
+  publishedAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  items ChangelogItem[]
+}
+
+model ChangelogItem {
+  id          String            @id @default(uuid())
+  releaseId   String
+  type        ChangelogItemType
+  title       String
+  description String?
+  displayOrder Int              @default(0)
+  createdAt   DateTime          @default(now())
+
+  release ChangelogRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@index([releaseId])
+}
+
+// ─── FAQ ─────────────────────────────────────────────────────────────────────────
+
+model FAQCategory {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  description  String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  faqs FAQ[]
+}
+
+model FAQ {
+  id           String        @id @default(uuid())
+  question     String
+  answer       String        @db.Text
+  categoryId   String?
+  status       ContentStatus @default(DRAFT)
+  displayOrder Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  category FAQCategory? @relation(fields: [categoryId], references: [id])
+
+  @@index([status])
+}
+
+// ─── Reviews ─────────────────────────────────────────────────────────────────────
+
+model Review {
+  id        String       @id @default(uuid())
+  userId    String
+  productId String
+  rating    Int
+  title     String?
+  content   String       @db.Text
+  status    ReviewStatus @default(PENDING)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@index([userId])
+  @@index([status])
+}
+
+// ─── Support ─────────────────────────────────────────────────────────────────────
+
+model SupportTicket {
+  id          String         @id @default(uuid())
+  ticketNumber String        @unique
+  userId      String
+  subject     String
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(NORMAL)
+  category    String?
+  deletedAt   DateTime?
+  resolvedAt  DateTime?
+  closedAt    DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  user        User                @relation(fields: [userId], references: [id])
+  messages    SupportMessage[]
+  attachments SupportAttachment[]
+  assignments SupportAssignment[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([ticketNumber])
+}
+
+model SupportMessage {
+  id         String   @id @default(uuid())
+  ticketId   String
+  userId     String
+  content    String   @db.Text
+  isInternal Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User          @relation(fields: [userId], references: [id])
+
+  @@index([ticketId])
+}
+
+model SupportAttachment {
+  id         String   @id @default(uuid())
+  ticketId   String
+  fileName   String
+  storageKey String
+  fileSize   Int
+  mimeType   String
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+model SupportAssignment {
+  id         String   @id @default(uuid())
+  ticketId   String
+  assigneeId String
+  assignedBy String?
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  ticket   SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  assignee User          @relation(fields: [assigneeId], references: [id])
+
+  @@index([ticketId])
+  @@index([assigneeId])
+}
+
+// ─── Contact ─────────────────────────────────────────────────────────────────────
+
+model ContactMessage {
+  id          String        @id @default(uuid())
+  name        String
+  email       String
+  subject     String
+  message     String        @db.Text
+  inquiryType String?
+  status      ContactStatus @default(NEW)
+  ipAddress   String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([status])
+  @@index([email])
+}
+
+// ─── Careers ─────────────────────────────────────────────────────────────────────
+
+model JobDepartment {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  description  String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  jobs Job[]
+}
+
+model Job {
+  id           String    @id @default(uuid())
+  title        String
+  slug         String    @unique
+  description  String    @db.Text
+  requirements String?   @db.Text
+  benefits     String?   @db.Text
+  location     String?
+  type         String?
+  salary       String?
+  status       JobStatus @default(DRAFT)
+  departmentId String?
+  publishedAt  DateTime?
+  closesAt     DateTime?
+  deletedAt    DateTime?
+  deletedBy    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  department   JobDepartment?   @relation(fields: [departmentId], references: [id])
+  applications JobApplication[]
+
+  @@index([slug])
+  @@index([status])
+}
+
+model JobApplication {
+  id           String            @id @default(uuid())
+  jobId        String
+  userId       String?
+  firstName    String
+  lastName     String
+  email        String
+  phone        String?
+  resumeKey    String?
+  coverLetter  String?           @db.Text
+  linkedinUrl  String?
+  portfolioUrl String?
+  status       ApplicationStatus @default(NEW)
+  notes        String?           @db.Text
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  job     Job                       @relation(fields: [jobId], references: [id])
+  user    User?                     @relation(fields: [userId], references: [id])
+  history ApplicationStatusHistory[]
+
+  @@index([jobId])
+  @@index([userId])
+  @@index([status])
+}
+
+model ApplicationStatusHistory {
+  id            String            @id @default(uuid())
+  applicationId String
+  fromStatus    ApplicationStatus?
+  toStatus      ApplicationStatus
+  changedBy     String?
+  notes         String?
+  createdAt     DateTime          @default(now())
+
+  application JobApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
+
+// ─── Team ────────────────────────────────────────────────────────────────────────
+
+model TeamMember {
+  id           String   @id @default(uuid())
+  name         String
+  position     String
+  bio          String?  @db.Text
+  profileImage String?
+  socialLinks  Json?
+  displayOrder Int      @default(0)
+  published    Boolean  @default(false)
+  department   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ─── Company CMS ─────────────────────────────────────────────────────────────────
+
+model CompanyProfile {
+  id          String   @id @default(uuid())
+  name        String
+  tagline     String?
+  description String?  @db.Text
+  mission     String?  @db.Text
+  vision      String?  @db.Text
+  foundedYear Int?
+  headquarters String?
+  email       String?
+  phone       String?
+  website     String?
+  logo        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model CompanyValue {
+  id           String   @id @default(uuid())
+  title        String
+  description  String?  @db.Text
+  icon         String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model CompanyTimeline {
+  id           String   @id @default(uuid())
+  title        String
+  description  String?  @db.Text
+  eventDate    DateTime
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Partner {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  description  String?  @db.Text
+  logo         String?
+  websiteUrl   String?
+  displayOrder Int      @default(0)
+  published    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([slug])
+}
+
+model Subsidiary {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  description  String?  @db.Text
+  logo         String?
+  websiteUrl   String?
+  location     String?
+  displayOrder Int      @default(0)
+  published    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([slug])
+}
+
+// ─── Roadmap ─────────────────────────────────────────────────────────────────────
+
+model RoadmapItem {
+  id           String        @id @default(uuid())
+  title        String
+  description  String?       @db.Text
+  status       RoadmapStatus @default(PLANNED)
+  category     String?
+  targetPeriod String?
+  isPublic     Boolean       @default(true)
+  displayOrder Int           @default(0)
+  productId    String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([status])
+  @@index([isPublic])
+}
+
+// ─── Notifications ───────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType @default(SYSTEM)
+  title     String
+  message   String
+  data      Json?
+  read      Boolean          @default(false)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+}
+
+model NotificationPreference {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  enabled   Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+}
+
+// ─── Analytics ───────────────────────────────────────────────────────────────────
+
+model AnalyticsEvent {
+  id        String             @id @default(uuid())
+  type      AnalyticsEventType
+  userId    String?
+  resource  String?
+  resourceId String?
+  metadata  Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime           @default(now())
+
+  @@index([type])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([resource, resourceId])
+}
+
+// ─── Audit ─────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  action     String
+  resource   String
+  resourceId String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([action])
+  @@index([resource])
+  @@index([createdAt])
+}
+
+// ─── System Settings ───────────────────────────────────────────────────────────────
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String   @db.Text
+  type      String   @default("string")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ReceiptCounter {
+  id      String @id @default(uuid())
+  year    Int    @unique
+  counter Int    @default(0)
+}
