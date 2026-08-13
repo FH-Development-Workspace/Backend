@@ -9,8 +9,10 @@ info:
 servers:
   - url: http://localhost:5000/api/v1
     description: Development
+  - url: https://backend-mczn.onrender.com/api/v1
+    description: Render (production)
   - url: https://api.fh-development.xyz/api/v1
-    description: Production
+    description: Custom domain
 
 components:
   securitySchemes:

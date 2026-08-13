@@ -1,11 +1,45 @@
 require('dotenv').config();
 
+const DEFAULT_ORIGINS = [
+  'https://fh-development.xyz',
+  'https://www.fh-development.xyz',
+  'https://dashboard.fh-development.xyz',
+  'https://backend-mczn.onrender.com',
+  'http://localhost:3000',
+  'http://localhost:3001',
+];
+
+const isRender = process.env.RENDER === 'true';
+const renderExternalUrl = process.env.RENDER_EXTERNAL_URL?.replace(/\/$/, '') || null;
+
+const nodeEnv = process.env.NODE_ENV || (isRender ? 'production' : 'development');
+
+const parseOrigins = () => {
+  const fromEnv = (process.env.ALLOWED_ORIGINS || DEFAULT_ORIGINS.join(','))
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+  const origins = new Set(fromEnv);
+
+  if (renderExternalUrl) origins.add(renderExternalUrl);
+
+  return [...origins];
+};
+
+const resolveApiBaseUrl = () => {
+  if (process.env.API_BASE_URL) return process.env.API_BASE_URL.replace(/\/$/, '');
+  if (renderExternalUrl) return renderExternalUrl;
+  return 'http://localhost:5000';
+};
+
 const env = {
-  nodeEnv: process.env.NODE_ENV || 'development',
+  nodeEnv,
   port: parseInt(process.env.PORT, 10) || 5000,
-  isProduction: process.env.NODE_ENV === 'production',
-  isDevelopment: process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test',
-  isTest: process.env.NODE_ENV === 'test',
+  isProduction: nodeEnv === 'production',
+  isDevelopment: nodeEnv !== 'production' && nodeEnv !== 'test',
+  isTest: nodeEnv === 'test',
+  isRender,
 
   databaseUrl: process.env.DATABASE_URL,
   directDatabaseUrl: process.env.DIRECT_URL,
@@ -19,13 +53,10 @@ const env = {
 
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   dashboardUrl: process.env.DASHBOARD_URL || 'http://localhost:3001',
-  apiBaseUrl: process.env.API_BASE_URL || 'http://localhost:5000',
+  apiBaseUrl: resolveApiBaseUrl(),
+  renderUrl: renderExternalUrl,
 
-  allowedOrigins: (process.env.ALLOWED_ORIGINS
-    || 'https://fh-development.xyz,https://www.fh-development.xyz,https://dashboard.fh-development.xyz,http://localhost:3000,http://localhost:3001')
-    .split(',')
-    .map((o) => o.trim())
-    .filter(Boolean),
+  allowedOrigins: parseOrigins(),
 
   smtp: {
     host: process.env.SMTP_HOST,

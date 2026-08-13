@@ -1,0 +1,62 @@
+services:
+  - type: web
+    name: fh-development-api
+    runtime: node
+    region: ohio
+    plan: free
+    branch: main
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    preDeployCommand: npm run render:release
+    healthCheckPath: /health
+    domains:
+      - api.fh-development.xyz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_BASE_URL
+        value: https://backend-mczn.onrender.com
+      - key: ALLOWED_ORIGINS
+        value: https://fh-development.xyz,https://www.fh-development.xyz,https://dashboard.fh-development.xyz,https://backend-mczn.onrender.com
+      - key: FRONTEND_URL
+        value: https://fh-development.xyz
+      - key: DASHBOARD_URL
+        value: https://dashboard.fh-development.xyz
+      - key: STORAGE_PROVIDER
+        value: cloudinary
+      - key: STORAGE_USE_LOCAL
+        value: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: SMTP_HOST
+        value: mail.spacemail.com
+      - key: SMTP_PORT
+        value: 465
+      - key: SMTP_FROM
+        value: no-reply@fh-development.xyz
+      - key: SMTP_FROM_NAME
+        value: FH Developments
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: CLOUDINARY_URL
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: VAULT_API_BASE_URL
+        value: https://api.vaultroblox.com
+      - key: VAULT_ENABLED
+        value: true
+      - key: VAULT_DEVELOPER_KEY
+        sync: false

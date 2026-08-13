@@ -10,9 +10,16 @@ const registerHealthRoutes = (app) => {
         name: 'fh-development-api',
         version: '1.0.0',
         environment: env.nodeEnv,
+        apiUrl: env.apiBaseUrl,
+        renderUrl: env.renderUrl,
         apiPrefix: '/api/v1',
-        docs: '/api/docs',
-        health: '/health',
+        docs: `${env.apiBaseUrl}/api/docs`,
+        health: `${env.apiBaseUrl}/health`,
+        endpoints: {
+          products: `${env.apiBaseUrl}/api/v1/products`,
+          auth: `${env.apiBaseUrl}/api/v1/auth`,
+          search: `${env.apiBaseUrl}/api/v1/search`,
+        },
       },
     });
   });
