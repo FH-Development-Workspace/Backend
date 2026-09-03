@@ -192,6 +192,7 @@ model User {
   auditLogs            AuditLog[]
   blogPosts            BlogPost[]             @relation("BlogAuthor")
   blogAuthor           BlogAuthor?
+  hostingCustomers     HostingCustomer[]
 
   @@index([email])
   @@index([username])
@@ -1236,3 +1237,73 @@ model ReceiptCounter {
   year    Int    @unique
   counter Int    @default(0)
 }
+
+// -------------------------------------------------------------------
+// HOSTING SERVICE MODELS
+// -------------------------------------------------------------------
+
+model HostingPlan {
+  id               String            @id @default(uuid())
+  name             String
+  slug             String            @unique
+  priceGBP         Float
+  billingPeriod    String            @default("monthly")
+  ramMB            Int
+  cpuPercent       Int
+  storageGB        Int
+  databaseLimit    Int
+  backupLimit      Int
+  modMailAvailable Boolean           @default(true)
+  recommended      Boolean           @default(false)
+  description      String
+  active           Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  customers        HostingCustomer[]
+  orders           HostingOrder[]
+  instances        HostingInstance[]
+}
+
+model HostingCustomer {
+  id            String            @id @default(uuid())
+  user          User              @relation(fields: [userId], references: [id])
+  userId        String
+  email         String
+  plan          HostingPlan       @relation(fields: [planId], references: [id])
+  planId        String
+  status        String            @default("PENDING") // PENDING, ACTIVE, SUSPENDED, CANCELLED
+  paymentStatus String            @default("UNPAID")
+  hostingStatus String            @default("PROVISIONING")
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  orders        HostingOrder[]
+  instances     HostingInstance[]
+}
+
+model HostingOrder {
+  id         String          @id @default(uuid())
+  customer   HostingCustomer @relation(fields: [customerId], references: [id])
+  customerId String
+  plan       HostingPlan     @relation(fields: [planId], references: [id])
+  planId     String
+  amount     Float
+  currency   String          @default("GBP")
+  status     String          @default("COMPLETED")
+  createdAt  DateTime        @default(now())
+}
+
+model HostingInstance {
+  id                 String          @id @default(uuid())
+  customer           HostingCustomer @relation(fields: [customerId], references: [id])
+  customerId         String
+  plan               HostingPlan     @relation(fields: [planId], references: [id])
+  planId             String
+  status             String          @default("PROVISIONING") // PROVISIONING, RUNNING, STOPPED, SUSPENDED
+  runtime            String          @default("nodejs")
+  hostname           String?
+  resourceAllocation Json?           // Details like assigned IP, port, specific node
+  deploymentStatus   String          @default("PENDING")
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+}
+

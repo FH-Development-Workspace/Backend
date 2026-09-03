@@ -276,6 +276,56 @@ async function main() {
     skipDuplicates: true,
   });
 
+  const hostingPlans = [
+    {
+      name: 'Starter',
+      slug: 'starter',
+      priceGBP: 1.16,
+      ramMB: 512,
+      cpuPercent: 50,
+      storageGB: 5,
+      databaseLimit: 1,
+      backupLimit: 1,
+      modMailAvailable: true,
+      recommended: false,
+      description: 'Best for: Small Discord bots',
+    },
+    {
+      name: 'Standard',
+      slug: 'standard',
+      priceGBP: 2.31,
+      ramMB: 1024,
+      cpuPercent: 100,
+      storageGB: 10,
+      databaseLimit: 2,
+      backupLimit: 2,
+      modMailAvailable: true,
+      recommended: true,
+      description: 'Best for: Most Discord bots and everyday workloads',
+    },
+    {
+      name: 'Premium',
+      slug: 'premium',
+      priceGBP: 4.04,
+      ramMB: 2048,
+      cpuPercent: 200,
+      storageGB: 20,
+      databaseLimit: 3,
+      backupLimit: 5,
+      modMailAvailable: true,
+      recommended: false,
+      description: 'Best for: Larger, more demanding Discord bots',
+    }
+  ];
+
+  for (const plan of hostingPlans) {
+    await prisma.hostingPlan.upsert({
+      where: { slug: plan.slug },
+      create: plan,
+      update: plan,
+    });
+  }
+
   console.log('Seed completed successfully.');
   console.log(`Admin: ${adminEmail} / (from SEED_ADMIN_PASSWORD env)`);
   console.log('Demo user: demo@fh-development.xyz / DemoUser123!');

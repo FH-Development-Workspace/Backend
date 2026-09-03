@@ -30,8 +30,14 @@ const searchRoutes = require('./routes/search.routes');
 const systemRoutes = require('./routes/system.routes');
 const vaultRoutes = require('./routes/vault.routes');
 const mediaRoutes = require('./routes/media.routes');
+const hostingRoutes = require('./routes/hosting.routes');
+const adminHostingRoutes = require('./routes/admin.hosting.routes');
 
 const router = Router();
+
+router.get('/', (req, res) => {
+  res.json({ success: true, message: 'FH Development API v1', version: '1.0.0' });
+});
 
 router.use('/auth', authRoutes);
 router.use('/account', accountRoutes);
@@ -68,5 +74,7 @@ router.use('/vault', vaultRoutes);
 router.use('/media', mediaRoutes);
 router.use('/system', systemRoutes);
 router.use('/activity', systemRoutes);
+router.use('/hosting', hostingRoutes);
+router.use('/admin/hosting', adminHostingRoutes);
 
 module.exports = router;
