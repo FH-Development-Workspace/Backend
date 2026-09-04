@@ -41,6 +41,7 @@ const PERMISSIONS = [
   ['ANALYTICS', 'VIEW'],
   ['AUDIT', 'VIEW'],
   ['SYSTEM', 'SETTINGS'],
+  ['HOSTING', 'VIEW'], ['HOSTING', 'MANAGE'],
 ];
 
 const ROLE_PERMISSIONS = {

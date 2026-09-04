@@ -15,7 +15,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: API_BASE_URL
-        value: https://backend-mczn.onrender.com
+        value: https://api.fh-development.xyz
       - key: ALLOWED_ORIGINS
         value: https://fh-development.xyz,https://www.fh-development.xyz,https://dashboard.fh-development.xyz,https://backend-mczn.onrender.com
       - key: FRONTEND_URL
@@ -59,4 +59,14 @@ services:
       - key: VAULT_ENABLED
         value: true
       - key: VAULT_DEVELOPER_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_HOSTING_STARTER_PAYMENT_LINK
+        sync: false
+      - key: STRIPE_HOSTING_STANDARD_PAYMENT_LINK
+        sync: false
+      - key: STRIPE_HOSTING_PREMIUM_PAYMENT_LINK
         sync: false

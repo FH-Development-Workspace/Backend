@@ -7,6 +7,10 @@ const DEFAULT_ORIGINS = [
   'https://backend-mczn.onrender.com',
   'http://localhost:3000',
   'http://localhost:3001',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+  'http://localhost:8080',
+  'http://127.0.0.1:8080',
 ];
 
 const isRender = process.env.RENDER === 'true';
@@ -93,6 +97,19 @@ const env = {
     enabled: process.env.VAULT_ENABLED === 'true' && !!process.env.VAULT_DEVELOPER_KEY,
   },
 
+  hosting: {
+    paymentLinks: {
+      starter: process.env.STRIPE_HOSTING_STARTER_PAYMENT_LINK,
+      standard: process.env.STRIPE_HOSTING_STANDARD_PAYMENT_LINK,
+      premium: process.env.STRIPE_HOSTING_PREMIUM_PAYMENT_LINK,
+    },
+  },
+
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY,
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+  },
+
   seed: {
     adminEmail: process.env.SEED_ADMIN_EMAIL,
     adminPassword: process.env.SEED_ADMIN_PASSWORD,
@@ -100,11 +117,30 @@ const env = {
   },
 };
 
-const required = ['DATABASE_URL', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
+const required = [
+  'DATABASE_URL',
+  'JWT_ACCESS_SECRET',
+  'JWT_REFRESH_SECRET',
+  'API_BASE_URL',
+  'FRONTEND_URL',
+  'ALLOWED_ORIGINS',
+];
 if (env.isProduction) {
   for (const key of required) {
     if (!process.env[key]) {
       throw new Error(`Missing required environment variable: ${key}`);
+    }
+  }
+
+  if (env.cloudinary.enabled) {
+    for (const key of ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET']) {
+      if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
+    }
+  }
+
+  if (process.env.VAULT_ENABLED === 'true') {
+    for (const key of ['VAULT_API_BASE_URL', 'VAULT_DEVELOPER_KEY']) {
+      if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
     }
   }
 }

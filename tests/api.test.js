@@ -96,6 +96,28 @@ describe('Authorization', () => {
     const res = await request(app).get('/api/v1/analytics/overview');
     expect(res.status).toBe(401);
   });
+
+  test('POST /api/v1/hosting/request requires authentication', async () => {
+    const res = await request(app)
+      .post('/api/v1/hosting/request')
+      .send({ planId: '00000000-0000-0000-0000-000000000000' });
+    expect(res.status).toBe(401);
+  });
+
+  test('POST /api/v1/admin/hosting/customers requires authentication', async () => {
+    const res = await request(app).get('/api/v1/admin/hosting/customers');
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('Stripe webhooks', () => {
+  test('rejects invalid webhook signatures', async () => {
+    const res = await request(app)
+      .post('/api/v1/webhooks/stripe')
+      .set('Stripe-Signature', 't=1,v1=invalid')
+      .send('{}');
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('404 handling', () => {

@@ -1281,15 +1281,20 @@ model HostingCustomer {
 }
 
 model HostingOrder {
-  id         String          @id @default(uuid())
-  customer   HostingCustomer @relation(fields: [customerId], references: [id])
-  customerId String
-  plan       HostingPlan     @relation(fields: [planId], references: [id])
-  planId     String
-  amount     Float
-  currency   String          @default("GBP")
-  status     String          @default("COMPLETED")
-  createdAt  DateTime        @default(now())
+  id                      String          @id @default(uuid())
+  customer                HostingCustomer @relation(fields: [customerId], references: [id])
+  customerId              String
+  plan                    HostingPlan     @relation(fields: [planId], references: [id])
+  planId                  String
+  amount                  Float
+  currency                String          @default("GBP")
+  status                  String           @default("COMPLETED")
+  stripeEventId           String?          @unique
+  stripePaymentReference  String?
+  createdAt               DateTime         @default(now())
+
+  @@index([customerId])
+  @@index([planId])
 }
 
 model HostingInstance {

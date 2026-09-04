@@ -73,6 +73,7 @@ router.use('/audit', auditRoutes);
 router.use('/vault', vaultRoutes);
 router.use('/media', mediaRoutes);
 router.use('/system', systemRoutes);
+router.use('/status', systemRoutes);
 router.use('/activity', systemRoutes);
 router.use('/hosting', hostingRoutes);
 router.use('/admin/hosting', adminHostingRoutes);

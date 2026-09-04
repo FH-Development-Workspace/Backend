@@ -7,8 +7,8 @@ const securityMiddleware = [
   cors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
+      if (!env.isProduction) return callback(null, true);
       if (env.allowedOrigins.includes(origin)) return callback(null, true);
-      if (env.isProduction && origin.endsWith('.onrender.com')) return callback(null, true);
       callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
