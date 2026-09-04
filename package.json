@@ -11,7 +11,7 @@
     "dev": "nodemon src/server.js",
     "build": "prisma generate",
     "postinstall": "prisma generate",
-    "render:release": "prisma db push --skip-generate",
+    "render:release": "prisma db push --skip-generate --accept-data-loss",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",

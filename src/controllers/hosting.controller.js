@@ -80,3 +80,16 @@ exports.getMyHosting = async (req, res) => {
     res.status(500).json({ success: false, error: 'Internal server error', message: error.message });
   }
 };
+
+exports.getMyHostingById = async (req, res) => {
+  try {
+    const service = await prisma.hostingCustomer.findFirst({
+      where: { id: req.params.id, userId: req.user.id },
+      include: { plan: true, instances: true, orders: true },
+    });
+    if (!service) return res.status(404).json({ success: false, error: 'Hosting service not found' });
+    res.json({ success: true, data: service });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+};

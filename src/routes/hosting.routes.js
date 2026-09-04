@@ -10,5 +10,6 @@ router.get('/plans/:slug', hostingController.getPlan);
 
 router.post('/request', authenticate, validate(hostingRequestSchema), hostingController.requestHosting);
 router.get('/me', authenticate, hostingController.getMyHosting);
+router.get('/me/:id', authenticate, hostingController.getMyHostingById);
 
 module.exports = router;

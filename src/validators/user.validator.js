@@ -22,6 +22,10 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8).max(128),
 });
 
+const deleteAccountSchema = z.object({
+  currentPassword: z.string().min(1),
+});
+
 const createUserSchema = z.object({
   username: z.string().min(3).max(30),
   email: z.string().email(),
@@ -38,6 +42,7 @@ module.exports = {
   updateProfileSchema,
   updateAccountSchema,
   changePasswordSchema,
+  deleteAccountSchema,
   createUserSchema,
   updateUserSchema,
 };

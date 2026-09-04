@@ -108,6 +108,38 @@ describe('Authorization', () => {
     const res = await request(app).get('/api/v1/admin/hosting/customers');
     expect(res.status).toBe(401);
   });
+
+  test('GET /api/v1/cart requires authentication', async () => {
+    const res = await request(app).get('/api/v1/cart');
+    expect(res.status).toBe(401);
+  });
+
+  test('GET /api/v1/purchases requires authentication', async () => {
+    const res = await request(app).get('/api/v1/purchases');
+    expect(res.status).toBe(401);
+  });
+
+  test('DELETE /api/v1/account requires authentication', async () => {
+    const res = await request(app).delete('/api/v1/account').send({ currentPassword: 'not-a-password' });
+    expect(res.status).toBe(401);
+  });
+
+  test('GET /api/v1/blacklist requires an admin permission', async () => {
+    const res = await request(app).get('/api/v1/blacklist');
+    expect(res.status).toBe(401);
+  });
+
+  test('GET /api/v1/hosting/me/:id requires authentication', async () => {
+    const res = await request(app).get('/api/v1/hosting/me/00000000-0000-0000-0000-000000000000');
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('Blacklist', () => {
+  test('public check validates identifiers', async () => {
+    const res = await request(app).get('/api/v1/blacklist/check');
+    expect(res.status).toBe(422);
+  });
 });
 
 describe('Stripe webhooks', () => {

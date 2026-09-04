@@ -17,7 +17,7 @@ services:
       - key: API_BASE_URL
         value: https://api.fh-development.xyz
       - key: ALLOWED_ORIGINS
-        value: https://fh-development.xyz,https://www.fh-development.xyz,https://dashboard.fh-development.xyz,https://backend-mczn.onrender.com
+        value: https://fh-development.xyz,https://www.fh-development.xyz,https://dashboard.fh-development.xyz,http://localhost:5500,http://127.0.0.1:5500
       - key: FRONTEND_URL
         value: https://fh-development.xyz
       - key: DASHBOARD_URL

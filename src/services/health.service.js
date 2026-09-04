@@ -24,6 +24,15 @@ const checkStorage = () => {
   return { storage: 'DEGRADED' };
 };
 
+const checkHosting = async () => {
+  try {
+    const activePlans = await withTimeout(prisma.hostingPlan.count({ where: { active: true } }), 1500);
+    return activePlans > 0 ? 'OPERATIONAL' : 'DEGRADED';
+  } catch {
+    return 'DOWN';
+  }
+};
+
 const getBasicHealth = () => ({
   status: 'OPERATIONAL',
   service: 'fh-development-api',
@@ -35,7 +44,7 @@ const getBasicHealth = () => ({
 });
 
 const getDetailedHealth = async () => {
-  const database = await checkDatabase();
+  const [database, hosting] = await Promise.all([checkDatabase(), checkHosting()]);
   const storageChecks = checkStorage();
 
   const services = {
@@ -44,11 +53,22 @@ const getDetailedHealth = async () => {
     authentication: 'OPERATIONAL',
     email: env.smtp.host ? 'OPERATIONAL' : 'DEGRADED',
     vault: env.vault.enabled ? 'CONFIGURED' : 'NOT_CONFIGURED',
+    roblox: env.vault.enabled ? 'CONFIGURED' : 'NOT_CONFIGURED',
+    discord: process.env.DISCORD_BOT_TOKEN ? 'CONFIGURED' : 'NOT_CONFIGURED',
+    hosting,
     ...storageChecks,
   };
 
-  const values = Object.values(services).filter((v) => v !== 'NOT_CONFIGURED');
-  const status = values.includes('DOWN') ? 'DOWN' : values.includes('DEGRADED') ? 'DEGRADED' : 'OPERATIONAL';
+  const coreValues = [services.api, services.database, services.authentication];
+  const optionalValues = Object.entries(services)
+    .filter(([name]) => !['api', 'database', 'authentication'].includes(name))
+    .map(([, value]) => value)
+    .filter((value) => value !== 'NOT_CONFIGURED');
+  const status = coreValues.includes('DOWN')
+    ? 'DOWN'
+    : coreValues.includes('DEGRADED') || optionalValues.includes('DOWN') || optionalValues.includes('DEGRADED')
+      ? 'DEGRADED'
+      : 'OPERATIONAL';
 
   return {
     status,

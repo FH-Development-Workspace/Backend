@@ -14,6 +14,7 @@ const createProductSchema = z.object({
   websiteUrl: z.string().url().optional().or(z.literal('')),
   metaTitle: z.string().max(200).optional(),
   metaDescription: z.string().max(500).optional(),
+  priceGBP: z.number().nonnegative().finite().optional(),
 });
 
 const updateProductSchema = createProductSchema.partial();

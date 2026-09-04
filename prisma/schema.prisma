@@ -193,6 +193,8 @@ model User {
   blogPosts            BlogPost[]             @relation("BlogAuthor")
   blogAuthor           BlogAuthor?
   hostingCustomers     HostingCustomer[]
+  cart                 Cart?
+  purchases            Purchase[]
 
   @@index([email])
   @@index([username])
@@ -346,6 +348,7 @@ model Product {
   websiteUrl   String?
   metaTitle    String?
   metaDescription String?
+  priceGBP       Float         @default(0)
   deletedAt    DateTime?
   deletedBy    String?
   createdAt    DateTime      @default(now())
@@ -360,10 +363,72 @@ model Product {
   reviews      Review[]
   downloads    Download[]
   licenses     License[]
+  cartItems    CartItem[]
+  purchaseItems PurchaseItem[]
 
   @@index([slug])
   @@index([status])
   @@index([published])
+}
+
+// ─── Commerce ────────────────────────────────────────────────────────────────
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  cartId    String
+  productId String
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([cartId, productId])
+  @@index([productId])
+}
+
+model Purchase {
+  id              String   @id @default(uuid())
+  userId          String
+  totalGBP        Float
+  currency        String   @default("GBP")
+  paymentStatus   String   @default("PENDING")
+  status          String   @default("PENDING")
+  paymentReference String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items PurchaseItem[]
+
+  @@index([userId, createdAt])
+  @@index([paymentStatus])
+}
+
+model PurchaseItem {
+  id             String   @id @default(uuid())
+  purchaseId     String
+  productId      String
+  quantity       Int
+  unitPriceGBP   Float
+  createdAt      DateTime @default(now())
+
+  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id])
+
+  @@index([purchaseId])
+  @@index([productId])
 }
 
 model ProductTechnology {
@@ -1067,6 +1132,8 @@ model CompanyProfile {
   name        String
   tagline     String?
   description String?  @db.Text
+  story       String?  @db.Text
+  stats       Json?
   mission     String?  @db.Text
   vision      String?  @db.Text
   foundedYear Int?
@@ -1230,6 +1297,21 @@ model SystemSetting {
   type      String   @default("string")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model BlacklistEntry {
+  id           String   @id @default(uuid())
+  robloxUserId String?  @unique
+  emailHash    String?  @unique
+  reason       String
+  permanent    Boolean  @default(false)
+  expiresAt    DateTime?
+  active       Boolean  @default(true)
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([active, expiresAt])
 }
 
 model ReceiptCounter {

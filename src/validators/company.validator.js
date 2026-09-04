@@ -12,6 +12,8 @@ const updateCompanyProfileSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   tagline: z.string().max(300).optional(),
   description: z.string().optional(),
+  story: z.string().optional(),
+  stats: z.record(z.string(), z.string()).optional(),
   mission: z.string().optional(),
   vision: z.string().optional(),
   foundedYear: z.number().int().optional(),

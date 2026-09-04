@@ -62,6 +62,31 @@ const changePassword = async (req, res, next) => {
   }
 };
 
+const deleteAccount = async (req, res, next) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    const valid = await authService.comparePassword(req.body.currentPassword, user.passwordHash);
+    if (!valid) throw new AppError('Current password is incorrect', 400, 'INVALID_PASSWORD');
+
+    const suffix = `${user.id}.${Date.now()}`;
+    await prisma.$transaction([
+      prisma.session.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } }),
+      prisma.user.update({
+        where: { id: user.id },
+        data: {
+          status: 'DELETED',
+          deletedAt: new Date(),
+          username: `deleted-${suffix}`,
+          email: `deleted-${suffix}@invalid.local`,
+        },
+      }),
+    ]);
+    sendSuccess(res, null, 'Account deleted');
+  } catch (err) {
+    next(err);
+  }
+};
+
 const getSessions = async (req, res, next) => {
   try {
     const sessions = await prisma.session.findMany({
@@ -147,6 +172,7 @@ module.exports = {
   updateAccount,
   updateProfile,
   changePassword,
+  deleteAccount,
   getSessions,
   revokeSession,
   getDownloads,

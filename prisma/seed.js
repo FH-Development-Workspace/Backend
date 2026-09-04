@@ -42,6 +42,7 @@ const PERMISSIONS = [
   ['AUDIT', 'VIEW'],
   ['SYSTEM', 'SETTINGS'],
   ['HOSTING', 'VIEW'], ['HOSTING', 'MANAGE'],
+  ['BLACKLIST', 'VIEW'], ['BLACKLIST', 'MANAGE'],
 ];
 
 const ROLE_PERMISSIONS = {
@@ -96,186 +97,55 @@ async function main() {
     }
   }
 
-  const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@fh-development.xyz';
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'ChangeMe123!';
+  const adminEmail = process.env.SEED_ADMIN_EMAIL;
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
   const adminUsername = process.env.SEED_ADMIN_USERNAME || 'admin';
 
-  const passwordHash = await bcrypt.hash(adminPassword, 12);
+  if (process.env.NODE_ENV === 'production' && (!adminEmail || !adminPassword)) {
+    throw new Error('SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD are required in production');
+  }
+
+  if (!adminEmail || !adminPassword) {
+    console.log('Skipping admin account seed because SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD are not configured.');
+  }
+
   const superAdminRole = await prisma.role.findUnique({ where: { slug: 'super_admin' } });
 
-  const admin = await prisma.user.upsert({
-    where: { email: adminEmail },
-    create: {
-      username: adminUsername,
-      email: adminEmail,
-      passwordHash,
-      emailVerified: true,
-      status: 'ACTIVE',
-      profile: { create: { displayName: 'System Administrator', firstName: 'System', lastName: 'Admin' } },
-      roles: superAdminRole ? { create: { roleId: superAdminRole.id } } : undefined,
-    },
-    update: { passwordHash, status: 'ACTIVE', emailVerified: true },
-  });
-
-  const userRole = await prisma.role.findUnique({ where: { slug: 'user' } });
-  await prisma.user.upsert({
-    where: { email: 'demo@fh-development.xyz' },
-    create: {
-      username: 'demouser',
-      email: 'demo@fh-development.xyz',
-      passwordHash: await bcrypt.hash('DemoUser123!', 12),
-      emailVerified: true,
-      status: 'ACTIVE',
-      profile: { create: { displayName: 'Demo User' } },
-      roles: userRole ? { create: { roleId: userRole.id } } : undefined,
-    },
-    update: {},
-  });
-
-  const productCategory = await prisma.productCategory.upsert({
-    where: { slug: 'software' },
-    create: { name: 'Software', slug: 'software', description: 'FH Development software products' },
-    update: {},
-  });
-
-  await prisma.product.upsert({
-    where: { slug: 'fh-studio' },
-    create: {
-      name: 'FH Studio',
-      slug: 'fh-studio',
-      tagline: 'Professional creative suite',
-      description: 'A powerful creative software suite for professionals.',
-      status: 'ACTIVE',
-      featured: true,
-      published: true,
-      categoryId: productCategory.id,
-      features: {
-        create: [
-          { title: 'Multi-platform', description: 'Works on Windows, macOS, and Linux', displayOrder: 1 },
-          { title: 'Cloud sync', description: 'Sync projects across devices', displayOrder: 2 },
-        ],
+  if (adminEmail && adminPassword) {
+    const passwordHash = await bcrypt.hash(adminPassword, 12);
+    await prisma.user.upsert({
+      where: { email: adminEmail },
+      create: {
+        username: adminUsername,
+        email: adminEmail,
+        passwordHash,
+        emailVerified: true,
+        status: 'ACTIVE',
+        profile: { create: { displayName: 'System Administrator' } },
+        roles: superAdminRole ? { create: { roleId: superAdminRole.id } } : undefined,
       },
-      technologies: {
-        create: [{ name: 'Electron' }, { name: 'React' }],
+      update: { passwordHash, status: 'ACTIVE', emailVerified: true },
+    });
+  }
+
+  const companyStory = 'FH Developments began with three people trying to help a community: Will, Rhys and Hybridz. Will and Hybridz set out to create a leading development store that could help people build better projects, while Rhys joined to support the project and lead public relations. That early collaboration grew into the company we see today. The name FH stands for Fistey and Hybridz Dynamics, with Fistey being Will\'s Discord username.';
+  const companyStats = { teamMembers: '100+', happyCustomers: '100+', thrivingAffiliates: '50+' };
+  const company = await prisma.companyProfile.findFirst();
+  if (company) {
+    await prisma.companyProfile.update({ where: { id: company.id }, data: { story: companyStory, stats: companyStats } });
+  } else {
+    await prisma.companyProfile.create({
+      data: {
+        name: 'FH Developments',
+        tagline: 'Driven by innovation, powered by people.',
+        description: 'FH Developments creates meaningful digital experiences for creators, communities and developers.',
+        story: companyStory,
+        stats: companyStats,
+        mission: 'To create dependable digital products that help people build, connect and grow.',
+        vision: 'A more capable and connected future for creators and communities.',
       },
-      versions: {
-        create: [{
-          version: '1.0.0',
-          releaseDate: new Date(),
-          releaseNotes: 'Initial release',
-          status: 'RELEASED',
-          supportedPlatforms: ['windows', 'macos', 'linux'],
-        }],
-      },
-    },
-    update: {},
-  });
-
-  await prisma.serviceCategory.upsert({
-    where: { slug: 'consulting' },
-    create: { name: 'Consulting', slug: 'consulting' },
-    update: {},
-  });
-
-  const consulting = await prisma.serviceCategory.findUnique({ where: { slug: 'consulting' } });
-  await prisma.service.upsert({
-    where: { slug: 'custom-software-development' },
-    create: {
-      name: 'Custom Software Development',
-      slug: 'custom-software-development',
-      tagline: 'Tailored solutions for your business',
-      description: 'End-to-end custom software development services.',
-      published: true,
-      featured: true,
-      categoryId: consulting?.id,
-    },
-    update: {},
-  });
-
-  await prisma.fAQCategory.upsert({
-    where: { slug: 'general' },
-    create: { name: 'General', slug: 'general' },
-    update: {},
-  });
-
-  const faqCat = await prisma.fAQCategory.findUnique({ where: { slug: 'general' } });
-  await prisma.fAQ.createMany({
-    data: [
-      { question: 'What is FH Development?', answer: 'FH Development is a software company building innovative products.', categoryId: faqCat?.id, status: 'PUBLISHED', displayOrder: 1 },
-      { question: 'How do I get support?', answer: 'Create a support ticket from your account dashboard or contact us.', categoryId: faqCat?.id, status: 'PUBLISHED', displayOrder: 2 },
-    ],
-    skipDuplicates: true,
-  });
-
-  await prisma.changelogRelease.upsert({
-    where: { version: '1.0.0' },
-    create: {
-      version: '1.0.0',
-      title: 'Initial Platform Release',
-      releaseDate: new Date(),
-      status: 'PUBLISHED',
-      publishedAt: new Date(),
-      items: {
-        create: [
-          { type: 'NEW', title: 'Platform launch', displayOrder: 1 },
-          { type: 'NEW', title: 'User authentication system', displayOrder: 2 },
-        ],
-      },
-    },
-    update: {},
-  });
-
-  await prisma.blogCategory.upsert({
-    where: { slug: 'announcements' },
-    create: { name: 'Announcements', slug: 'announcements' },
-    update: {},
-  });
-
-  const blogCat = await prisma.blogCategory.findUnique({ where: { slug: 'announcements' } });
-  await prisma.blogPost.upsert({
-    where: { slug: 'welcome-to-fh-development' },
-    create: {
-      title: 'Welcome to FH Development',
-      slug: 'welcome-to-fh-development',
-      excerpt: 'Introducing our new platform.',
-      content: '<p>We are excited to launch the FH Development platform.</p>',
-      status: 'PUBLISHED',
-      featured: true,
-      categoryId: blogCat?.id,
-      publishedAt: new Date(),
-    },
-    update: {},
-  });
-
-  await prisma.roadmapItem.createMany({
-    data: [
-      { title: 'Mobile App', description: 'Native mobile applications', status: 'PLANNED', category: 'Product', targetPeriod: '2026 Q4', isPublic: true, displayOrder: 1 },
-      { title: 'API v2', description: 'Next generation API', status: 'IN_PROGRESS', category: 'Engineering', targetPeriod: '2026 Q3', isPublic: true, displayOrder: 2 },
-    ],
-    skipDuplicates: true,
-  });
-
-  await prisma.companyProfile.deleteMany({});
-  await prisma.companyProfile.create({
-    data: {
-      name: 'FH Development',
-      tagline: 'Building the future of software',
-      description: 'FH Development creates innovative software products and services.',
-      mission: 'To build exceptional software that empowers people.',
-      foundedYear: 2020,
-      headquarters: 'Global',
-      website: 'https://fh-development.xyz',
-      email: 'hello@fh-development.xyz',
-    },
-  });
-
-  await prisma.teamMember.createMany({
-    data: [
-      { name: 'Alex Founder', position: 'CEO & Founder', bio: 'Leading FH Development vision.', published: true, displayOrder: 1 },
-      { name: 'Sam Engineer', position: 'Lead Developer', bio: 'Building core platform.', published: true, displayOrder: 2 },
-    ],
-    skipDuplicates: true,
-  });
+    });
+  }
 
   const hostingPlans = [
     {
@@ -328,8 +198,7 @@ async function main() {
   }
 
   console.log('Seed completed successfully.');
-  console.log(`Admin: ${adminEmail} / (from SEED_ADMIN_PASSWORD env)`);
-  console.log('Demo user: demo@fh-development.xyz / DemoUser123!');
+  if (adminEmail) console.log(`Admin seeded for ${adminEmail}.`);
 }
 
 main()
