@@ -17,6 +17,11 @@ const logger = require('./utils/logger');
 const app = express();
 
 app.set('trust proxy', 1);
+app.disable('etag');
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 app.use(...securityMiddleware);
 app.use(compression());

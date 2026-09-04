@@ -62,6 +62,11 @@ describe('Authentication validation', () => {
     const res = await request(app).get('/api/v1/auth/me');
     expect(res.status).toBe(401);
   });
+
+  test('GET /api/v1/users/me requires authentication', async () => {
+    const res = await request(app).get('/api/v1/users/me');
+    expect(res.status).toBe(401);
+  });
 });
 
 describe('Public endpoints', () => {
@@ -131,6 +136,11 @@ describe('Authorization', () => {
 
   test('GET /api/v1/hosting/me/:id requires authentication', async () => {
     const res = await request(app).get('/api/v1/hosting/me/00000000-0000-0000-0000-000000000000');
+    expect(res.status).toBe(401);
+  });
+
+  test('GET /api/v1/support/tickets requires authentication', async () => {
+    const res = await request(app).get('/api/v1/support/tickets');
     expect(res.status).toBe(401);
   });
 });
