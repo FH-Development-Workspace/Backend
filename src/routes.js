@@ -35,6 +35,7 @@ const adminHostingRoutes = require('./routes/admin.hosting.routes');
 const cartRoutes = require('./routes/cart.routes');
 const purchasesRoutes = require('./routes/purchases.routes');
 const blacklistRoutes = require('./routes/blacklist.routes');
+const { createTypeRouter } = require('./routes/content-entry.routes');
 
 const router = Router();
 
@@ -84,6 +85,9 @@ router.use('/hosting', hostingRoutes);
 router.use('/cart', cartRoutes);
 router.use('/purchases', purchasesRoutes);
 router.use('/blacklist', blacklistRoutes);
+for (const type of ['press', 'events', 'community', 'sponsorships', 'features', 'announcements']) {
+  router.use(`/${type}`, createTypeRouter(type));
+}
 router.use('/admin/hosting', adminHostingRoutes);
 
 module.exports = router;

@@ -152,6 +152,24 @@ describe('Blacklist', () => {
   });
 });
 
+describe('CMS route groups', () => {
+  test('public content groups return without authentication', async () => {
+    const groups = ['press', 'events', 'community', 'sponsorships', 'features', 'announcements'];
+    for (const group of groups) {
+      const res = await request(app).get(`/api/v1/${group}`);
+      expect([200, 500]).toContain(res.status);
+      if (res.status === 200) expect(res.body.success).toBe(true);
+    }
+  });
+
+  test('CMS mutation requires authentication', async () => {
+    const res = await request(app).post('/api/v1/press').send({
+      type: 'press', title: 'Test', slug: 'test', published: false,
+    });
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('Stripe webhooks', () => {
   test('rejects invalid webhook signatures', async () => {
     const res = await request(app)

@@ -43,6 +43,7 @@ const PERMISSIONS = [
   ['SYSTEM', 'SETTINGS'],
   ['HOSTING', 'VIEW'], ['HOSTING', 'MANAGE'],
   ['BLACKLIST', 'VIEW'], ['BLACKLIST', 'MANAGE'],
+  ['CONTENT', 'VIEW'], ['CONTENT', 'MANAGE'],
 ];
 
 const ROLE_PERMISSIONS = {
