@@ -1,42 +1,25 @@
-const prisma = require('../config/database');
-const storageService = require('../services/storage.service');
-const emailService = require('../services/email.service');
+const { query } = require('../config/database');
 const { sendSuccess, sendPaginated } = require('../utils/response');
 const { getPagination, buildPaginationMeta } = require('../utils/pagination');
 const { AppError } = require('../middleware/error.middleware');
 
 const apply = async (req, res, next) => {
   try {
-    const job = await prisma.job.findUnique({ where: { id: req.params.id } });
-    if (!job || job.status !== 'PUBLISHED') {
-      throw new AppError('Job not available', 404, 'NOT_FOUND');
+    const { jobId, fullName, email, phone, resumeUrl, coverLetter } = req.body;
+    if (!jobId || !fullName || !email || !resumeUrl) {
+      throw new AppError('jobId, fullName, email, and resumeUrl are required', 400, 'BAD_REQUEST');
     }
 
-    let resumeKey = null;
-    if (req.file) {
-      const uploaded = await storageService.upload(req.file, `applications/${job.id}`);
-      resumeKey = uploaded.storageKey;
-    }
+    const jobRes = await query("SELECT id FROM jobs WHERE id = $1 AND status = 'OPEN'", [jobId]);
+    if (!jobRes.rows.length) throw new AppError('Job opening not available', 404, 'NOT_FOUND');
 
-    const application = await prisma.jobApplication.create({
-      data: {
-        jobId: job.id,
-        userId: req.user?.id || null,
-        ...req.body,
-        resumeKey,
-      },
-    });
+    const appRes = await query(`
+      INSERT INTO job_applications (job_id, full_name, email, phone, resume_url, cover_letter, status)
+      VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
+      RETURNING *
+    `, [jobId, fullName, email, phone || null, resumeUrl, coverLetter || null]);
 
-    await prisma.applicationStatusHistory.create({
-      data: { applicationId: application.id, toStatus: 'NEW' },
-    });
-
-    await emailService.sendTemplate(req.body.email, 'applicationReceived', {
-      name: `${req.body.firstName} ${req.body.lastName}`,
-      jobTitle: job.title,
-    });
-
-    sendSuccess(res, { id: application.id }, 'Application submitted', 201);
+    sendSuccess(res, { application: appRes.rows[0] }, 'Application submitted', 201);
   } catch (err) {
     next(err);
   }
@@ -45,25 +28,18 @@ const apply = async (req, res, next) => {
 const list = async (req, res, next) => {
   try {
     const { page, limit, skip } = getPagination(req.query);
-    const where = {};
-    if (req.query.jobId) where.jobId = req.query.jobId;
-    if (req.query.status) where.status = req.query.status;
+    const countRes = await query('SELECT COUNT(*) FROM job_applications');
+    const total = parseInt(countRes.rows[0].count, 10);
 
-    const [items, total] = await Promise.all([
-      prisma.jobApplication.findMany({
-        where,
-        include: {
-          job: { select: { id: true, title: true, slug: true } },
-          history: { orderBy: { createdAt: 'desc' }, take: 5 },
-        },
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.jobApplication.count({ where }),
-    ]);
+    const itemsRes = await query(`
+      SELECT ja.*, j.title as "jobTitle", j.department as "jobDepartment"
+      FROM job_applications ja
+      JOIN jobs j ON ja.job_id = j.id
+      ORDER BY ja.created_at DESC
+      LIMIT $1 OFFSET $2
+    `, [limit, skip]);
 
-    sendPaginated(res, items, buildPaginationMeta(page, limit, total));
+    sendPaginated(res, itemsRes.rows, buildPaginationMeta(page, limit, total));
   } catch (err) {
     next(err);
   }
@@ -71,15 +47,15 @@ const list = async (req, res, next) => {
 
 const getById = async (req, res, next) => {
   try {
-    const application = await prisma.jobApplication.findUnique({
-      where: { id: req.params.id },
-      include: {
-        job: true,
-        history: { orderBy: { createdAt: 'desc' } },
-      },
-    });
-    if (!application) throw new AppError('Application not found', 404, 'NOT_FOUND');
-    sendSuccess(res, { application });
+    const appRes = await query(`
+      SELECT ja.*, j.title as "jobTitle", j.department as "jobDepartment"
+      FROM job_applications ja
+      JOIN jobs j ON ja.job_id = j.id
+      WHERE ja.id = $1
+    `, [req.params.id]);
+
+    if (!appRes.rows.length) throw new AppError('Application not found', 404, 'NOT_FOUND');
+    sendSuccess(res, { application: appRes.rows[0] });
   } catch (err) {
     next(err);
   }
@@ -87,25 +63,16 @@ const getById = async (req, res, next) => {
 
 const updateStatus = async (req, res, next) => {
   try {
-    const current = await prisma.jobApplication.findUnique({ where: { id: req.params.id } });
-    if (!current) throw new AppError('Application not found', 404, 'NOT_FOUND');
+    const { status } = req.body;
+    const appRes = await query(`
+      UPDATE job_applications
+      SET status = COALESCE($1, status)
+      WHERE id = $2
+      RETURNING *
+    `, [status, req.params.id]);
 
-    const application = await prisma.jobApplication.update({
-      where: { id: req.params.id },
-      data: { status: req.body.status, notes: req.body.notes },
-    });
-
-    await prisma.applicationStatusHistory.create({
-      data: {
-        applicationId: application.id,
-        fromStatus: current.status,
-        toStatus: req.body.status,
-        changedBy: req.user.id,
-        notes: req.body.notes,
-      },
-    });
-
-    sendSuccess(res, { application }, 'Application updated');
+    if (!appRes.rows.length) throw new AppError('Application not found', 404, 'NOT_FOUND');
+    sendSuccess(res, { application: appRes.rows[0] }, 'Status updated');
   } catch (err) {
     next(err);
   }

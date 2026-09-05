@@ -1,6 +1,6 @@
 const { verifyAccessToken } = require('../utils/tokens');
 const { loadUserPermissions, sanitizeUser } = require('../utils/permissions');
-const prisma = require('../config/database');
+const { query } = require('../config/database');
 const { sendError } = require('../utils/response');
 
 const authenticate = async (req, res, next) => {
@@ -18,12 +18,13 @@ const authenticate = async (req, res, next) => {
       return sendError(res, 'Invalid or expired token', 401, 'INVALID_TOKEN');
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      include: { profile: true },
-    });
+    const userRes = await query('SELECT * FROM users WHERE id = $1', [decoded.userId]);
+    if (!userRes.rows.length) {
+      return sendError(res, 'Account not available', 401, 'ACCOUNT_UNAVAILABLE');
+    }
 
-    if (!user || user.status === 'DELETED' || user.status === 'BANNED') {
+    const user = userRes.rows[0];
+    if (user.status === 'DELETED' || user.status === 'BANNED') {
       return sendError(res, 'Account not available', 401, 'ACCOUNT_UNAVAILABLE');
     }
 

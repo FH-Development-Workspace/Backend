@@ -1,15 +1,11 @@
-const prisma = require('../config/database');
-const { createUniqueSlug } = require('../utils/slug');
+const { query } = require('../config/database');
 const { sendSuccess } = require('../utils/response');
 const { AppError } = require('../middleware/error.middleware');
 
 const list = async (req, res, next) => {
   try {
-    const categories = await prisma.productCategory.findMany({
-      orderBy: { displayOrder: 'asc' },
-      include: { _count: { select: { products: true } } },
-    });
-    sendSuccess(res, { categories });
+    const resCat = await query('SELECT * FROM categories ORDER BY sort_order ASC, name ASC');
+    sendSuccess(res, { categories: resCat.rows });
   } catch (err) {
     next(err);
   }
@@ -17,9 +13,16 @@ const list = async (req, res, next) => {
 
 const create = async (req, res, next) => {
   try {
-    const slug = await createUniqueSlug(req.body.name, prisma.productCategory);
-    const category = await prisma.productCategory.create({ data: { ...req.body, slug } });
-    sendSuccess(res, { category }, 'Category created', 201);
+    const { name, description, icon, sortOrder } = req.body;
+    const slug = (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'cat-' + Date.now();
+
+    const resCat = await query(`
+      INSERT INTO categories (name, slug, description, icon, sort_order)
+      VALUES ($1, $2, $3, $4, COALESCE($5, 0))
+      RETURNING *
+    `, [name, slug, description || null, icon || null, sortOrder]);
+
+    sendSuccess(res, { category: resCat.rows[0] }, 'Category created', 201);
   } catch (err) {
     next(err);
   }
@@ -27,11 +30,20 @@ const create = async (req, res, next) => {
 
 const update = async (req, res, next) => {
   try {
-    const category = await prisma.productCategory.update({
-      where: { id: req.params.id },
-      data: req.body,
-    });
-    sendSuccess(res, { category }, 'Category updated');
+    const { name, description, icon, sortOrder } = req.body;
+    const resCat = await query(`
+      UPDATE categories
+      SET name = COALESCE($1, name),
+          description = COALESCE($2, description),
+          icon = COALESCE($3, icon),
+          sort_order = COALESCE($4, sort_order),
+          updated_at = NOW()
+      WHERE id = $5
+      RETURNING *
+    `, [name, description, icon, sortOrder, req.params.id]);
+
+    if (!resCat.rows.length) throw new AppError('Category not found', 404, 'NOT_FOUND');
+    sendSuccess(res, { category: resCat.rows[0] }, 'Category updated');
   } catch (err) {
     next(err);
   }
@@ -39,7 +51,7 @@ const update = async (req, res, next) => {
 
 const remove = async (req, res, next) => {
   try {
-    await prisma.productCategory.delete({ where: { id: req.params.id } });
+    await query('DELETE FROM categories WHERE id = $1', [req.params.id]);
     sendSuccess(res, null, 'Category deleted');
   } catch (err) {
     next(err);

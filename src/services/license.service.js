@@ -1,4 +1,4 @@
-const prisma = require('../config/database');
+const { query, transaction } = require('../config/database');
 const { generateLicenseKey } = require('../utils/tokens');
 const emailService = require('./email.service');
 const notificationService = require('./notification.service');
@@ -7,39 +7,38 @@ const analyticsService = require('./analytics.service');
 const { AppError } = require('../middleware/error.middleware');
 
 const createLicense = async (data, actorId, req) => {
-  const product = await prisma.product.findUnique({ where: { id: data.productId } });
-  if (!product) throw new AppError('Product not found', 404, 'NOT_FOUND');
+  const productRes = await query('SELECT id, name, slug FROM products WHERE id = $1', [data.productId]);
+  if (!productRes.rows.length) throw new AppError('Product not found', 404, 'NOT_FOUND');
+  const product = productRes.rows[0];
 
-  const user = await prisma.user.findUnique({ where: { id: data.userId } });
-  if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
+  const userRes = await query('SELECT id, email, username FROM users WHERE id = $1', [data.userId]);
+  if (!userRes.rows.length) throw new AppError('User not found', 404, 'NOT_FOUND');
+  const user = userRes.rows[0];
 
   let licenseKey;
   let attempts = 0;
   do {
     licenseKey = generateLicenseKey();
     attempts++;
-  } while (await prisma.license.findUnique({ where: { licenseKey } }) && attempts < 10);
+    const check = await query('SELECT id FROM licenses WHERE license_key = $1', [licenseKey]);
+    if (!check.rows.length) break;
+  } while (attempts < 10);
 
-  const license = await prisma.license.create({
-    data: {
-      licenseKey,
-      productId: data.productId,
-      userId: data.userId,
-      type: data.type || 'PERSONAL',
-      status: 'ACTIVE',
-      expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
-      activationLimit: data.activationLimit || 1,
-      notes: data.notes,
-    },
-    include: {
-      product: { select: { name: true, slug: true } },
-      user: { select: { id: true, email: true, username: true } },
-    },
-  });
+  const maxActivations = data.activationLimit || data.maxActivations || 1;
+  const expiresAt = data.expiresAt ? new Date(data.expiresAt) : null;
 
-  await prisma.licenseEvent.create({
-    data: { licenseId: license.id, event: 'CREATED', metadata: { actorId } },
-  });
+  const licRes = await query(`
+    INSERT INTO licenses (user_id, product_id, license_key, type, status, max_activations, expires_at)
+    VALUES ($1, $2, $3, $4, 'ACTIVE', $5, $6)
+    RETURNING *
+  `, [user.id, product.id, licenseKey, data.type || 'COMMERCIAL', maxActivations, expiresAt]);
+
+  const license = licRes.rows[0];
+
+  await query(`
+    INSERT INTO license_events (license_id, event_type, details)
+    VALUES ($1, 'CREATED', $2)
+  `, [license.id, JSON.stringify({ actorId })]);
 
   await auditService.log({
     actorId,
@@ -60,105 +59,91 @@ const createLicense = async (data, actorId, req) => {
     type: 'LICENSE',
     title: 'License Created',
     message: `Your license for ${product.name} has been created.`,
-    data: { licenseId: license.id },
+    link: `/client-dashboard/licenses.html`,
   });
 
-  return license;
+  return { ...license, product, user };
 };
 
-const activateLicense = async (licenseKey, machineId, machineName, req) => {
-  const license = await prisma.license.findUnique({
-    where: { licenseKey },
-    include: { product: true },
-  });
+const activateLicense = async (licenseKey, hwid, userAgent, req) => {
+  const licRes = await query(`
+    SELECT l.*, p.name as product_name
+    FROM licenses l
+    JOIN products p ON l.product_id = p.id
+    WHERE l.license_key = $1
+  `, [licenseKey]);
 
-  if (!license) throw new AppError('Invalid license key', 404, 'NOT_FOUND');
+  if (!licRes.rows.length) throw new AppError('Invalid license key', 404, 'NOT_FOUND');
+  const license = licRes.rows[0];
+
   if (license.status !== 'ACTIVE') {
     throw new AppError(`License is ${license.status.toLowerCase()}`, 403, 'LICENSE_INACTIVE');
   }
-  if (license.expiresAt && license.expiresAt < new Date()) {
-    await prisma.license.update({ where: { id: license.id }, data: { status: 'EXPIRED' } });
+
+  if (license.expires_at && new Date(license.expires_at) < new Date()) {
+    await query("UPDATE licenses SET status = 'EXPIRED' WHERE id = $1", [license.id]);
     throw new AppError('License has expired', 403, 'LICENSE_EXPIRED');
   }
-  if (license.activationCount >= license.activationLimit) {
+
+  if (license.current_activations >= license.max_activations) {
     throw new AppError('Activation limit reached', 403, 'ACTIVATION_LIMIT');
   }
 
-  const existing = await prisma.licenseActivation.findFirst({
-    where: { licenseId: license.id, machineId, isActive: true },
-  });
-  if (existing) {
-    return { activation: existing, license };
+  const existing = await query(`
+    SELECT * FROM license_activations
+    WHERE license_id = $1 AND hwid = $2
+  `, [license.id, hwid]);
+
+  if (existing.rows.length > 0) {
+    await query('UPDATE license_activations SET last_check_in = NOW() WHERE id = $1', [existing.rows[0].id]);
+    return { activation: existing.rows[0], license };
   }
 
-  const activation = await prisma.licenseActivation.create({
-    data: {
-      licenseId: license.id,
-      machineId,
-      machineName,
-      ipAddress: req?.ip,
-    },
-  });
+  const actRes = await query(`
+    INSERT INTO license_activations (license_id, ip_address, hwid, user_agent)
+    VALUES ($1, $2, $3, $4)
+    RETURNING *
+  `, [license.id, req?.ip, hwid, userAgent]);
 
-  await prisma.license.update({
-    where: { id: license.id },
-    data: { activationCount: { increment: 1 } },
-  });
+  await query('UPDATE licenses SET current_activations = current_activations + 1 WHERE id = $1', [license.id]);
 
-  await prisma.licenseEvent.create({
-    data: {
-      licenseId: license.id,
-      event: 'ACTIVATED',
-      metadata: { machineId, machineName },
-    },
-  });
+  await query(`
+    INSERT INTO license_events (license_id, event_type, details)
+    VALUES ($1, 'ACTIVATED', $2)
+  `, [license.id, JSON.stringify({ hwid, userAgent })]);
 
-  await analyticsService.logEvent('LICENSE_EVENT', {
-    userId: license.userId,
-    resource: 'license',
-    resourceId: license.id,
-    metadata: { event: 'ACTIVATED' },
-  });
-
-  return { activation, license };
+  return { activation: actRes.rows[0], license };
 };
 
-const deactivateLicense = async (licenseKey, machineId, userId) => {
-  const license = await prisma.license.findUnique({ where: { licenseKey } });
-  if (!license) throw new AppError('Invalid license key', 404, 'NOT_FOUND');
-  if (license.userId !== userId) throw new AppError('Access denied', 403, 'FORBIDDEN');
+const deactivateLicense = async (licenseKey, hwid, userId) => {
+  const licRes = await query('SELECT * FROM licenses WHERE license_key = $1', [licenseKey]);
+  if (!licRes.rows.length) throw new AppError('Invalid license key', 404, 'NOT_FOUND');
+  const license = licRes.rows[0];
 
-  const activation = await prisma.licenseActivation.findFirst({
-    where: { licenseId: license.id, machineId, isActive: true },
-  });
-  if (!activation) throw new AppError('Activation not found', 404, 'NOT_FOUND');
+  if (license.user_id !== userId) throw new AppError('Access denied', 403, 'FORBIDDEN');
 
-  await prisma.licenseActivation.update({
-    where: { id: activation.id },
-    data: { isActive: false, deactivatedAt: new Date() },
-  });
+  const actRes = await query('SELECT * FROM license_activations WHERE license_id = $1 AND hwid = $2', [license.id, hwid]);
+  if (!actRes.rows.length) throw new AppError('Activation not found', 404, 'NOT_FOUND');
 
-  await prisma.license.update({
-    where: { id: license.id },
-    data: { activationCount: { decrement: 1 } },
-  });
+  await query('DELETE FROM license_activations WHERE id = $1', [actRes.rows[0].id]);
+  await query('UPDATE licenses SET current_activations = GREATEST(0, current_activations - 1) WHERE id = $1', [license.id]);
 
-  await prisma.licenseEvent.create({
-    data: { licenseId: license.id, event: 'DEACTIVATED', metadata: { machineId } },
-  });
+  await query(`
+    INSERT INTO license_events (license_id, event_type, details)
+    VALUES ($1, 'DEACTIVATED', $2)
+  `, [license.id, JSON.stringify({ hwid })]);
 
   return { deactivated: true };
 };
 
 const revokeLicense = async (licenseId, actorId, req) => {
-  const license = await prisma.license.update({
-    where: { id: licenseId },
-    data: { status: 'REVOKED' },
-  });
+  const res = await query("UPDATE licenses SET status = 'REVOKED' WHERE id = $1 RETURNING *", [licenseId]);
+  if (!res.rows.length) throw new AppError('License not found', 404, 'NOT_FOUND');
 
-  await prisma.licenseEvent.create({
-    data: { licenseId, event: 'REVOKED', metadata: { actorId } },
-  });
+  await query(`
+    INSERT INTO license_events (license_id, event_type, details)
+    VALUES ($1, 'REVOKED', $2)
+  `, [licenseId, JSON.stringify({ actorId })]);
 
   await auditService.log({
     actorId,
@@ -168,41 +153,35 @@ const revokeLicense = async (licenseId, actorId, req) => {
     ipAddress: req?.ip,
   });
 
-  return license;
+  return res.rows[0];
 };
 
 const renewLicense = async (licenseId, expiresAt, actorId) => {
-  const license = await prisma.license.update({
-    where: { id: licenseId },
-    data: {
-      expiresAt: new Date(expiresAt),
-      status: 'ACTIVE',
-    },
-  });
+  const res = await query("UPDATE licenses SET expires_at = $1, status = 'ACTIVE' WHERE id = $2 RETURNING *", [new Date(expiresAt), licenseId]);
+  if (!res.rows.length) throw new AppError('License not found', 404, 'NOT_FOUND');
 
-  await prisma.licenseEvent.create({
-    data: { licenseId, event: 'RENEWED', metadata: { actorId, expiresAt } },
-  });
+  await query(`
+    INSERT INTO license_events (license_id, event_type, details)
+    VALUES ($1, 'RENEWED', $2)
+  `, [licenseId, JSON.stringify({ actorId, expiresAt })]);
 
-  return license;
+  return res.rows[0];
 };
 
-const getUserLicenses = async (userId, { skip, limit }) => {
-  const [items, total] = await Promise.all([
-    prisma.license.findMany({
-      where: { userId, deletedAt: null },
-      include: {
-        product: { select: { id: true, name: true, slug: true } },
-        activations: { where: { isActive: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
-    }),
-    prisma.license.count({ where: { userId, deletedAt: null } }),
-  ]);
+const getUserLicenses = async (userId, { skip = 0, limit = 20 }) => {
+  const countRes = await query('SELECT COUNT(*) FROM licenses WHERE user_id = $1', [userId]);
+  const total = parseInt(countRes.rows[0].count, 10);
 
-  return { items, total };
+  const itemsRes = await query(`
+    SELECT l.*, p.name as "productName", p.slug as "productSlug"
+    FROM licenses l
+    JOIN products p ON l.product_id = p.id
+    WHERE l.user_id = $1
+    ORDER BY l.created_at DESC
+    LIMIT $2 OFFSET $3
+  `, [userId, limit, skip]);
+
+  return { items: itemsRes.rows, total };
 };
 
 module.exports = {

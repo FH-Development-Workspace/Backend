@@ -1,5 +1,4 @@
-const prisma = require('../config/database');
-const { createUniqueSlug } = require('../utils/slug');
+const { query } = require('../config/database');
 const { sendSuccess, sendPaginated } = require('../utils/response');
 const { getPagination, buildPaginationMeta } = require('../utils/pagination');
 const { AppError } = require('../middleware/error.middleware');
@@ -7,21 +6,18 @@ const { AppError } = require('../middleware/error.middleware');
 const list = async (req, res, next) => {
   try {
     const { page, limit, skip } = getPagination(req.query);
-    const where = { deletedAt: null };
-    if (req.query.published !== 'false') where.status = 'PUBLISHED';
+    const countRes = await query("SELECT COUNT(*) FROM products WHERE status = 'ACTIVE'");
+    const total = parseInt(countRes.rows[0].count, 10);
 
-    const [items, total] = await Promise.all([
-      prisma.project.findMany({
-        where,
-        include: { category: true, technologies: true, images: { orderBy: { displayOrder: 'asc' } } },
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.project.count({ where }),
-    ]);
+    const itemsRes = await query(`
+      SELECT id, name, slug, summary as description, status, created_at
+      FROM products
+      WHERE status = 'ACTIVE'
+      ORDER BY created_at DESC
+      LIMIT $1 OFFSET $2
+    `, [limit, skip]);
 
-    sendPaginated(res, items, buildPaginationMeta(page, limit, total));
+    sendPaginated(res, itemsRes.rows, buildPaginationMeta(page, limit, total));
   } catch (err) {
     next(err);
   }
@@ -29,12 +25,9 @@ const list = async (req, res, next) => {
 
 const getBySlug = async (req, res, next) => {
   try {
-    const project = await prisma.project.findFirst({
-      where: { slug: req.params.slug, deletedAt: null, status: 'PUBLISHED' },
-      include: { category: true, technologies: true, images: { orderBy: { displayOrder: 'asc' } } },
-    });
-    if (!project) throw new AppError('Project not found', 404, 'NOT_FOUND');
-    sendSuccess(res, { project });
+    const resProj = await query("SELECT id, name, slug, summary as description, status, created_at FROM products WHERE slug = $1 AND status = 'ACTIVE'", [req.params.slug]);
+    if (!resProj.rows.length) throw new AppError('Project not found', 404, 'NOT_FOUND');
+    sendSuccess(res, { project: resProj.rows[0] });
   } catch (err) {
     next(err);
   }
@@ -42,9 +35,14 @@ const getBySlug = async (req, res, next) => {
 
 const create = async (req, res, next) => {
   try {
-    const slug = await createUniqueSlug(req.body.name, prisma.project);
-    const project = await prisma.project.create({ data: { ...req.body, slug } });
-    sendSuccess(res, { project }, 'Project created', 201);
+    const { name, description } = req.body;
+    const slug = (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'project-' + Date.now();
+    const resProj = await query(`
+      INSERT INTO products (name, slug, summary, description, status)
+      VALUES ($1, $2, $3, $3, 'ACTIVE')
+      RETURNING *
+    `, [name, slug, description || name]);
+    sendSuccess(res, { project: resProj.rows[0] }, 'Project created', 201);
   } catch (err) {
     next(err);
   }
@@ -52,8 +50,19 @@ const create = async (req, res, next) => {
 
 const update = async (req, res, next) => {
   try {
-    const project = await prisma.project.update({ where: { id: req.params.id }, data: req.body });
-    sendSuccess(res, { project }, 'Project updated');
+    const { name, description } = req.body;
+    const resProj = await query(`
+      UPDATE products
+      SET name = COALESCE($1, name),
+          summary = COALESCE($2, summary),
+          description = COALESCE($2, description),
+          updated_at = NOW()
+      WHERE id = $3
+      RETURNING *
+    `, [name, description, req.params.id]);
+
+    if (!resProj.rows.length) throw new AppError('Project not found', 404, 'NOT_FOUND');
+    sendSuccess(res, { project: resProj.rows[0] }, 'Project updated');
   } catch (err) {
     next(err);
   }
@@ -61,10 +70,7 @@ const update = async (req, res, next) => {
 
 const remove = async (req, res, next) => {
   try {
-    await prisma.project.update({
-      where: { id: req.params.id },
-      data: { deletedAt: new Date() },
-    });
+    await query("UPDATE products SET status = 'DISCONTINUED' WHERE id = $1", [req.params.id]);
     sendSuccess(res, null, 'Project deleted');
   } catch (err) {
     next(err);

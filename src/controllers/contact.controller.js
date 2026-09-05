@@ -1,24 +1,25 @@
-const prisma = require('../config/database');
+const { query } = require('../config/database');
 const emailService = require('../services/email.service');
-const analyticsService = require('../services/analytics.service');
 const { sendSuccess, sendPaginated } = require('../utils/response');
 const { getPagination, buildPaginationMeta } = require('../utils/pagination');
+const { AppError } = require('../middleware/error.middleware');
 
 const submit = async (req, res, next) => {
   try {
-    const message = await prisma.contactMessage.create({
-      data: { ...req.body, ipAddress: req.ip },
-    });
+    const { name, email, subject, message } = req.body;
+    if (!name || !email || !message) {
+      throw new AppError('Name, email, and message are required', 400, 'BAD_REQUEST');
+    }
 
-    await emailService.sendTemplate(process.env.SMTP_FROM || 'admin@fh-development.xyz', 'contactNotification', req.body);
+    const contactRes = await query(`
+      INSERT INTO contact_messages (name, email, subject, message, status)
+      VALUES ($1, $2, $3, $4, 'NEW')
+      RETURNING *
+    `, [name, email, subject || null, message]);
 
-    await analyticsService.logEvent('CONTACT', {
-      resource: 'contact',
-      resourceId: message.id,
-      ipAddress: req.ip,
-    });
+    await emailService.sendTemplate(email, 'contactReceived', { name, message });
 
-    sendSuccess(res, { id: message.id }, 'Message received', 201);
+    sendSuccess(res, { contact: contactRes.rows[0] }, 'Contact message received', 201);
   } catch (err) {
     next(err);
   }
@@ -27,15 +28,26 @@ const submit = async (req, res, next) => {
 const list = async (req, res, next) => {
   try {
     const { page, limit, skip } = getPagination(req.query);
-    const where = {};
-    if (req.query.status) where.status = req.query.status;
+    const countRes = await query('SELECT COUNT(*) FROM contact_messages');
+    const total = parseInt(countRes.rows[0].count, 10);
 
-    const [items, total] = await Promise.all([
-      prisma.contactMessage.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
-      prisma.contactMessage.count({ where }),
-    ]);
+    const itemsRes = await query(`
+      SELECT * FROM contact_messages
+      ORDER BY created_at DESC
+      LIMIT $1 OFFSET $2
+    `, [limit, skip]);
 
-    sendPaginated(res, items, buildPaginationMeta(page, limit, total));
+    sendPaginated(res, itemsRes.rows, buildPaginationMeta(page, limit, total));
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getById = async (req, res, next) => {
+  try {
+    const resContact = await query('SELECT * FROM contact_messages WHERE id = $1', [req.params.id]);
+    if (!resContact.rows.length) throw new AppError('Contact message not found', 404, 'NOT_FOUND');
+    sendSuccess(res, { contact: resContact.rows[0] });
   } catch (err) {
     next(err);
   }
@@ -43,14 +55,19 @@ const list = async (req, res, next) => {
 
 const updateStatus = async (req, res, next) => {
   try {
-    const message = await prisma.contactMessage.update({
-      where: { id: req.params.id },
-      data: { status: req.body.status },
-    });
-    sendSuccess(res, { message }, 'Status updated');
+    const { status } = req.body;
+    const resContact = await query(`
+      UPDATE contact_messages
+      SET status = COALESCE($1, status)
+      WHERE id = $2
+      RETURNING *
+    `, [status, req.params.id]);
+
+    if (!resContact.rows.length) throw new AppError('Contact message not found', 404, 'NOT_FOUND');
+    sendSuccess(res, { contact: resContact.rows[0] }, 'Status updated');
   } catch (err) {
     next(err);
   }
 };
 
-module.exports = { submit, list, updateStatus };
+module.exports = { submit, list, getById, updateStatus };

@@ -1,57 +1,59 @@
-const prisma = require('../config/database');
+const { query: dbQuery } = require('../config/database');
 
-const search = async (query, limit = 5) => {
-  if (!query || query.trim().length < 2) {
-    return { products: [], services: [], projects: [], blog: [], docs: [], changelog: [], faq: [], careers: [] };
+const search = async (qText, limit = 5) => {
+  if (!qText || qText.trim().length < 2) {
+    return { products: [], services: [], blog: [], docs: [], changelog: [], careers: [] };
   }
 
-  const q = query.trim();
-  const contains = { contains: q, mode: 'insensitive' };
+  const q = `%${qText.trim()}%`;
 
-  const [products, services, projects, blog, docs, changelog, faq, careers] = await Promise.all([
-    prisma.product.findMany({
-      where: { published: true, deletedAt: null, OR: [{ name: contains }, { description: contains }] },
-      select: { id: true, name: true, slug: true, tagline: true },
-      take: limit,
-    }),
-    prisma.service.findMany({
-      where: { published: true, deletedAt: null, OR: [{ name: contains }, { description: contains }] },
-      select: { id: true, name: true, slug: true, tagline: true },
-      take: limit,
-    }),
-    prisma.project.findMany({
-      where: { status: 'PUBLISHED', deletedAt: null, OR: [{ name: contains }, { description: contains }] },
-      select: { id: true, name: true, slug: true, description: true },
-      take: limit,
-    }),
-    prisma.blogPost.findMany({
-      where: { status: 'PUBLISHED', deletedAt: null, OR: [{ title: contains }, { excerpt: contains }] },
-      select: { id: true, title: true, slug: true, excerpt: true },
-      take: limit,
-    }),
-    prisma.documentationArticle.findMany({
-      where: { status: 'PUBLISHED', deletedAt: null, OR: [{ title: contains }, { content: contains }] },
-      select: { id: true, title: true, slug: true },
-      take: limit,
-    }),
-    prisma.changelogRelease.findMany({
-      where: { status: 'PUBLISHED', OR: [{ version: contains }, { title: contains }] },
-      select: { id: true, version: true, title: true },
-      take: limit,
-    }),
-    prisma.fAQ.findMany({
-      where: { status: 'PUBLISHED', OR: [{ question: contains }, { answer: contains }] },
-      select: { id: true, question: true },
-      take: limit,
-    }),
-    prisma.job.findMany({
-      where: { status: 'PUBLISHED', deletedAt: null, OR: [{ title: contains }, { description: contains }] },
-      select: { id: true, title: true, slug: true, location: true },
-      take: limit,
-    }),
+  const [productsRes, servicesRes, blogRes, docsRes, changelogRes, jobsRes] = await Promise.all([
+    dbQuery(`
+      SELECT id, name, slug, summary
+      FROM products
+      WHERE status = 'ACTIVE' AND (name ILIKE $1 OR description ILIKE $1 OR summary ILIKE $1)
+      LIMIT $2
+    `, [q, limit]),
+    dbQuery(`
+      SELECT id, name, slug, summary
+      FROM services
+      WHERE active = true AND (name ILIKE $1 OR description ILIKE $1 OR summary ILIKE $1)
+      LIMIT $2
+    `, [q, limit]),
+    dbQuery(`
+      SELECT id, title, slug, excerpt
+      FROM blog_posts
+      WHERE status = 'PUBLISHED' AND (title ILIKE $1 OR excerpt ILIKE $1 OR content ILIKE $1)
+      LIMIT $2
+    `, [q, limit]),
+    dbQuery(`
+      SELECT id, title, slug
+      FROM documentation_articles
+      WHERE title ILIKE $1 OR content ILIKE $1
+      LIMIT $2
+    `, [q, limit]),
+    dbQuery(`
+      SELECT id, version, title, summary
+      FROM changelog_releases
+      WHERE version ILIKE $1 OR title ILIKE $1 OR summary ILIKE $1
+      LIMIT $2
+    `, [q, limit]),
+    dbQuery(`
+      SELECT id, title, department, location
+      FROM jobs
+      WHERE status = 'OPEN' AND (title ILIKE $1 OR description ILIKE $1 OR department ILIKE $1)
+      LIMIT $2
+    `, [q, limit]),
   ]);
 
-  return { products, services, projects, blog, docs, changelog, faq, careers };
+  return {
+    products: productsRes.rows,
+    services: servicesRes.rows,
+    blog: blogRes.rows,
+    docs: docsRes.rows,
+    changelog: changelogRes.rows,
+    careers: jobsRes.rows,
+  };
 };
 
 module.exports = { search };

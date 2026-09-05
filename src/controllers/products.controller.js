@@ -1,4 +1,4 @@
-const prisma = require('../config/database');
+const { query } = require('../config/database');
 const { createUniqueSlug } = require('../utils/slug');
 const auditService = require('../services/audit.service');
 const analyticsService = require('../services/analytics.service');
@@ -6,44 +6,72 @@ const { sendSuccess, sendPaginated } = require('../utils/response');
 const { getPagination, buildPaginationMeta } = require('../utils/pagination');
 const { AppError } = require('../middleware/error.middleware');
 
-const productInclude = {
-  category: true,
-  technologies: true,
-  features: { orderBy: { displayOrder: 'asc' } },
-  screenshots: { orderBy: { displayOrder: 'asc' } },
-  versions: { orderBy: { releaseDate: 'desc' }, take: 5 },
-  _count: { select: { reviews: true, downloads: true } },
-};
+const formatProduct = (p) => ({
+  id: p.id,
+  name: p.name,
+  slug: p.slug,
+  summary: p.summary,
+  description: p.description,
+  priceGBP: parseFloat(p.price_gbp || 0),
+  isFree: p.is_free,
+  status: p.status,
+  featured: p.featured,
+  bannerUrl: p.banner_url,
+  iconUrl: p.icon_url,
+  createdAt: p.created_at,
+  updatedAt: p.updated_at,
+  category: p.category_name ? {
+    id: p.category_id,
+    name: p.category_name,
+    slug: p.category_slug,
+  } : null,
+});
 
 const list = async (req, res, next) => {
   try {
     const { page, limit, skip } = getPagination(req.query);
-    const where = { deletedAt: null };
-    if (req.query.published === 'true') where.published = true;
-    if (req.query.featured === 'true') where.featured = true;
-    if (req.query.status) where.status = req.query.status;
-    if (req.query.category) where.category = { slug: req.query.category };
+    let whereClauses = [];
+    let params = [];
+
+    if (req.query.featured === 'true') {
+      whereClauses.push('p.featured = true');
+    }
+    if (req.query.status) {
+      params.push(req.query.status);
+      whereClauses.push(`p.status = $${params.length}`);
+    } else if (req.query.published === 'true') {
+      whereClauses.push("p.status = 'ACTIVE'");
+    }
+    if (req.query.category) {
+      params.push(req.query.category);
+      whereClauses.push(`c.slug = $${params.length}`);
+    }
     if (req.query.search) {
-      where.OR = [
-        { name: { contains: req.query.search, mode: 'insensitive' } },
-        { description: { contains: req.query.search, mode: 'insensitive' } },
-      ];
+      params.push(`%${req.query.search}%`);
+      whereClauses.push(`(p.name ILIKE $${params.length} OR p.description ILIKE $${params.length})`);
     }
 
-    const orderBy = req.query.sort === 'name' ? { name: 'asc' } : { createdAt: 'desc' };
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-    const [items, total] = await Promise.all([
-      prisma.product.findMany({
-        where,
-        include: { category: true, technologies: true },
-        skip,
-        take: limit,
-        orderBy,
-      }),
-      prisma.product.count({ where }),
-    ]);
+    const countRes = await query(`
+      SELECT COUNT(*) FROM products p
+      LEFT JOIN categories c ON p.category_id = c.id
+      ${whereSql}
+    `, params);
+    const total = parseInt(countRes.rows[0].count, 10);
 
-    sendPaginated(res, items, buildPaginationMeta(page, limit, total));
+    const listParams = [...params, limit, skip];
+    const itemsRes = await query(`
+      SELECT p.*, c.name as category_name, c.slug as category_slug
+      FROM products p
+      LEFT JOIN categories c ON p.category_id = c.id
+      ${whereSql}
+      ORDER BY p.created_at DESC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+    `, listParams);
+
+    const formatted = itemsRes.rows.map(formatProduct);
+    sendPaginated(res, formatted, buildPaginationMeta(page, limit, total));
   } catch (err) {
     next(err);
   }
@@ -51,17 +79,15 @@ const list = async (req, res, next) => {
 
 const getBySlug = async (req, res, next) => {
   try {
-    const where = { slug: req.params.slug, deletedAt: null };
-    if (!req.userPermissions?.includes('PRODUCT_VIEW')) {
-      where.published = true;
-    }
+    const result = await query(`
+      SELECT p.*, c.name as category_name, c.slug as category_slug
+      FROM products p
+      LEFT JOIN categories c ON p.category_id = c.id
+      WHERE p.slug = $1
+    `, [req.params.slug]);
 
-    const product = await prisma.product.findFirst({
-      where,
-      include: productInclude,
-    });
-
-    if (!product) throw new AppError('Product not found', 404, 'NOT_FOUND');
+    if (!result.rows.length) throw new AppError('Product not found', 404, 'NOT_FOUND');
+    const product = formatProduct(result.rows[0]);
 
     await analyticsService.logEvent('PRODUCT_VIEW', {
       userId: req.user?.id,
@@ -78,11 +104,20 @@ const getBySlug = async (req, res, next) => {
 
 const create = async (req, res, next) => {
   try {
-    const slug = await createUniqueSlug(req.body.name, prisma.product);
-    const product = await prisma.product.create({
-      data: { ...req.body, slug },
-      include: productInclude,
-    });
+    const { name, summary, description, priceGBP, isFree, status, featured, bannerUrl, iconUrl, categoryId } = req.body;
+    const slug = (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'product-' + Date.now();
+
+    const result = await query(`
+      INSERT INTO products (category_id, name, slug, summary, description, price_gbp, is_free, status, featured, banner_url, icon_url)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 'ACTIVE'), COALESCE($9, false), $10, $11)
+      RETURNING *
+    `, [
+      categoryId || null, name, slug, summary || null, description,
+      priceGBP || 0.00, isFree || false, status || 'ACTIVE', featured || false,
+      bannerUrl || null, iconUrl || null
+    ]);
+
+    const product = formatProduct(result.rows[0]);
 
     await auditService.log({
       actorId: req.user.id,
@@ -100,16 +135,30 @@ const create = async (req, res, next) => {
 
 const update = async (req, res, next) => {
   try {
-    const data = { ...req.body };
-    if (data.name) {
-      data.slug = await createUniqueSlug(data.name, prisma.product, 'slug', req.params.id);
-    }
+    const { name, summary, description, priceGBP, isFree, status, featured, bannerUrl, iconUrl, categoryId } = req.body;
 
-    const product = await prisma.product.update({
-      where: { id: req.params.id },
-      data,
-      include: productInclude,
-    });
+    const result = await query(`
+      UPDATE products
+      SET category_id = COALESCE($1, category_id),
+          name = COALESCE($2, name),
+          summary = COALESCE($3, summary),
+          description = COALESCE($4, description),
+          price_gbp = COALESCE($5, price_gbp),
+          is_free = COALESCE($6, is_free),
+          status = COALESCE($7, status),
+          featured = COALESCE($8, featured),
+          banner_url = COALESCE($9, banner_url),
+          icon_url = COALESCE($10, icon_url),
+          updated_at = NOW()
+      WHERE id = $11
+      RETURNING *
+    `, [
+      categoryId, name, summary, description, priceGBP,
+      isFree, status, featured, bannerUrl, iconUrl, req.params.id
+    ]);
+
+    if (!result.rows.length) throw new AppError('Product not found', 404, 'NOT_FOUND');
+    const product = formatProduct(result.rows[0]);
 
     await auditService.log({
       actorId: req.user.id,
@@ -127,10 +176,7 @@ const update = async (req, res, next) => {
 
 const remove = async (req, res, next) => {
   try {
-    await prisma.product.update({
-      where: { id: req.params.id },
-      data: { deletedAt: new Date(), deletedBy: req.user.id },
-    });
+    await query("UPDATE products SET status = 'DISCONTINUED', updated_at = NOW() WHERE id = $1", [req.params.id]);
 
     await auditService.log({
       actorId: req.user.id,
@@ -148,20 +194,18 @@ const remove = async (req, res, next) => {
 
 const publish = async (req, res, next) => {
   try {
-    const product = await prisma.product.update({
-      where: { id: req.params.id },
-      data: { published: true, status: 'ACTIVE' },
-    });
+    const result = await query("UPDATE products SET status = 'ACTIVE', updated_at = NOW() WHERE id = $1 RETURNING *", [req.params.id]);
+    if (!result.rows.length) throw new AppError('Product not found', 404, 'NOT_FOUND');
 
     await auditService.log({
       actorId: req.user.id,
       action: 'PRODUCT_PUBLISHED',
       resource: 'product',
-      resourceId: product.id,
+      resourceId: req.params.id,
       ipAddress: req.ip,
     });
 
-    sendSuccess(res, { product }, 'Product published');
+    sendSuccess(res, { product: formatProduct(result.rows[0]) }, 'Product published');
   } catch (err) {
     next(err);
   }

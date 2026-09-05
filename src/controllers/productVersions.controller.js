@@ -1,18 +1,11 @@
-const prisma = require('../config/database');
-const auditService = require('../services/audit.service');
-const { sendSuccess, sendPaginated } = require('../utils/response');
-const { getPagination, buildPaginationMeta } = require('../utils/pagination');
+const { query } = require('../config/database');
+const { sendSuccess } = require('../utils/response');
 const { AppError } = require('../middleware/error.middleware');
 
 const list = async (req, res, next) => {
   try {
-    const where = { productId: req.params.productId };
-    const versions = await prisma.productVersion.findMany({
-      where,
-      include: { _count: { select: { files: true } } },
-      orderBy: { releaseDate: 'desc' },
-    });
-    sendSuccess(res, { versions });
+    const resVer = await query('SELECT * FROM product_versions WHERE product_id = $1 ORDER BY created_at DESC', [req.params.productId]);
+    sendSuccess(res, { versions: resVer.rows });
   } catch (err) {
     next(err);
   }
@@ -20,11 +13,16 @@ const list = async (req, res, next) => {
 
 const create = async (req, res, next) => {
   try {
-    const data = { ...req.body, productId: req.params.productId };
-    if (data.releaseDate) data.releaseDate = new Date(data.releaseDate);
+    const { version, changelog, status } = req.body;
+    const { productId } = req.params;
 
-    const version = await prisma.productVersion.create({ data });
-    sendSuccess(res, { version }, 'Version created', 201);
+    const resVer = await query(`
+      INSERT INTO product_versions (product_id, version, changelog, status)
+      VALUES ($1, $2, $3, COALESCE($4, 'RELEASED'))
+      RETURNING *
+    `, [productId, version, changelog || null, status]);
+
+    sendSuccess(res, { version: resVer.rows[0] }, 'Version created', 201);
   } catch (err) {
     next(err);
   }
@@ -32,14 +30,19 @@ const create = async (req, res, next) => {
 
 const update = async (req, res, next) => {
   try {
-    const data = { ...req.body };
-    if (data.releaseDate) data.releaseDate = new Date(data.releaseDate);
+    const { version, changelog, status } = req.body;
+    const resVer = await query(`
+      UPDATE product_versions
+      SET version = COALESCE($1, version),
+          changelog = COALESCE($2, changelog),
+          status = COALESCE($3, status),
+          updated_at = NOW()
+      WHERE id = $4
+      RETURNING *
+    `, [version, changelog, status, req.params.id]);
 
-    const version = await prisma.productVersion.update({
-      where: { id: req.params.id },
-      data,
-    });
-    sendSuccess(res, { version }, 'Version updated');
+    if (!resVer.rows.length) throw new AppError('Version not found', 404, 'NOT_FOUND');
+    sendSuccess(res, { version: resVer.rows[0] }, 'Version updated');
   } catch (err) {
     next(err);
   }
@@ -47,7 +50,7 @@ const update = async (req, res, next) => {
 
 const remove = async (req, res, next) => {
   try {
-    await prisma.productVersion.delete({ where: { id: req.params.id } });
+    await query('DELETE FROM product_versions WHERE id = $1', [req.params.id]);
     sendSuccess(res, null, 'Version deleted');
   } catch (err) {
     next(err);

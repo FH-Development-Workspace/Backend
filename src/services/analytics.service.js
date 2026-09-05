@@ -1,143 +1,107 @@
-const prisma = require('../config/database');
+const { query } = require('../config/database');
 const auditService = require('./audit.service');
 
 const logEvent = async (type, data = {}) => {
   try {
-    await prisma.analyticsEvent.create({
-      data: {
-        type,
-        userId: data.userId || null,
-        resource: data.resource || null,
-        resourceId: data.resourceId || null,
-        metadata: data.metadata || null,
-        ipAddress: data.ipAddress || null,
-        userAgent: data.userAgent || null,
-      },
+    await auditService.log({
+      actorId: data.userId || null,
+      action: type,
+      resource: data.resource || 'system',
+      resourceId: data.resourceId || null,
+      details: data.metadata || null,
+      ipAddress: data.ipAddress || null,
     });
   } catch (err) {
-    // Analytics should not break main flow
+    // Non-blocking
   }
 };
 
 const getOverview = async (days = 30) => {
-  const since = new Date();
-  since.setDate(since.getDate() - days);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  const events = await prisma.analyticsEvent.groupBy({
-    by: ['type'],
-    where: { createdAt: { gte: since } },
-    _count: { id: true },
-  });
-
-  const [users, products, downloads, tickets] = await Promise.all([
-    prisma.user.count({ where: { status: 'ACTIVE' } }),
-    prisma.product.count({ where: { published: true, deletedAt: null } }),
-    prisma.download.count({ where: { createdAt: { gte: since } } }),
-    prisma.supportTicket.count({ where: { createdAt: { gte: since } } }),
+  const [usersRes, productsRes, ticketsRes, hostingRes] = await Promise.all([
+    query("SELECT COUNT(*) FROM users WHERE status = 'ACTIVE'"),
+    query("SELECT COUNT(*) FROM products WHERE status = 'ACTIVE'"),
+    query('SELECT COUNT(*) FROM support_tickets WHERE created_at >= $1', [since]),
+    query('SELECT COUNT(*) FROM hosting_requests WHERE created_at >= $1', [since]),
   ]);
 
   return {
     period: { days, since },
-    totals: { users, products, downloads, tickets },
-    events: events.map((e) => ({ type: e.type, count: e._count.id })),
+    totals: {
+      users: parseInt(usersRes.rows[0].count, 10),
+      products: parseInt(productsRes.rows[0].count, 10),
+      tickets: parseInt(ticketsRes.rows[0].count, 10),
+      hostingRequests: parseInt(hostingRes.rows[0].count, 10),
+    },
   };
 };
 
 const getProductAnalytics = async (days = 30) => {
-  const since = new Date();
-  since.setDate(since.getDate() - days);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  const views = await prisma.analyticsEvent.count({
-    where: { type: 'PRODUCT_VIEW', createdAt: { gte: since } },
-  });
-
-  const downloads = await prisma.download.groupBy({
-    by: ['productId'],
-    where: { createdAt: { gte: since } },
-    _count: { id: true },
-    orderBy: { _count: { id: 'desc' } },
-    take: 10,
-  });
-
-  const productIds = downloads.map((d) => d.productId);
-  const products = await prisma.product.findMany({
-    where: { id: { in: productIds } },
-    select: { id: true, name: true, slug: true },
-  });
-
-  const productMap = Object.fromEntries(products.map((p) => [p.id, p]));
+  const viewsRes = await query("SELECT COUNT(*) FROM audit_logs WHERE action = 'PRODUCT_VIEW' AND created_at >= $1", [since]);
+  const licensesRes = await query(`
+    SELECT p.id, p.name, p.slug, COUNT(l.id) as count
+    FROM products p
+    LEFT JOIN licenses l ON l.product_id = p.id AND l.created_at >= $1
+    GROUP BY p.id, p.name, p.slug
+    ORDER BY count DESC
+    LIMIT 10
+  `, [since]);
 
   return {
-    views,
-    topDownloads: downloads.map((d) => ({
-      product: productMap[d.productId],
-      count: d._count.id,
-    })),
+    views: parseInt(viewsRes.rows[0].count, 10),
+    topProducts: licensesRes.rows,
   };
 };
 
 const getDownloadAnalytics = async (days = 30) => {
-  const since = new Date();
-  since.setDate(since.getDate() - days);
-
-  const total = await prisma.download.count({ where: { createdAt: { gte: since } } });
-  const byStatus = await prisma.download.groupBy({
-    by: ['status'],
-    where: { createdAt: { gte: since } },
-    _count: { id: true },
-  });
-
-  return { total, byStatus: byStatus.map((s) => ({ status: s.status, count: s._count.id })) };
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const res = await query("SELECT COUNT(*) FROM audit_logs WHERE action = 'FILE_DOWNLOAD' AND created_at >= $1", [since]);
+  return { total: parseInt(res.rows[0].count, 10) };
 };
 
 const getUserAnalytics = async (days = 30) => {
-  const since = new Date();
-  since.setDate(since.getDate() - days);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  const [total, newUsers, logins] = await Promise.all([
-    prisma.user.count({ where: { status: 'ACTIVE' } }),
-    prisma.user.count({ where: { createdAt: { gte: since } } }),
-    prisma.analyticsEvent.count({ where: { type: 'LOGIN', createdAt: { gte: since } } }),
+  const [totalRes, newRes, loginsRes] = await Promise.all([
+    query("SELECT COUNT(*) FROM users WHERE status = 'ACTIVE'"),
+    query('SELECT COUNT(*) FROM users WHERE created_at >= $1', [since]),
+    query("SELECT COUNT(*) FROM audit_logs WHERE action = 'LOGIN' AND created_at >= $1", [since]),
   ]);
 
-  return { total, newUsers, logins };
+  return {
+    total: parseInt(totalRes.rows[0].count, 10),
+    newUsers: parseInt(newRes.rows[0].count, 10),
+    logins: parseInt(loginsRes.rows[0].count, 10),
+  };
 };
 
 const getSupportAnalytics = async (days = 30) => {
-  const since = new Date();
-  since.setDate(since.getDate() - days);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  const byStatus = await prisma.supportTicket.groupBy({
-    by: ['status'],
-    where: { createdAt: { gte: since } },
-    _count: { id: true },
-  });
-
-  const byPriority = await prisma.supportTicket.groupBy({
-    by: ['priority'],
-    where: { createdAt: { gte: since } },
-    _count: { id: true },
-  });
+  const [statusRes, priorityRes] = await Promise.all([
+    query('SELECT status, COUNT(*) as count FROM support_tickets WHERE created_at >= $1 GROUP BY status', [since]),
+    query('SELECT priority, COUNT(*) as count FROM support_tickets WHERE created_at >= $1 GROUP BY priority', [since]),
+  ]);
 
   return {
-    byStatus: byStatus.map((s) => ({ status: s.status, count: s._count.id })),
-    byPriority: byPriority.map((p) => ({ priority: p.priority, count: p._count.id })),
+    byStatus: statusRes.rows.map(r => ({ status: r.status, count: parseInt(r.count, 10) })),
+    byPriority: priorityRes.rows.map(r => ({ priority: r.priority, count: parseInt(r.count, 10) })),
   };
 };
 
 const getWebsiteAnalytics = async (days = 30) => {
-  const since = new Date();
-  since.setDate(since.getDate() - days);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const eventsRes = await query(`
+    SELECT action as type, COUNT(*) as count
+    FROM audit_logs
+    WHERE created_at >= $1
+    GROUP BY action
+  `, [since]);
 
-  const types = ['PAGE_VIEW', 'BLOG_VIEW', 'DOC_VIEW', 'SEARCH', 'CONTACT'];
-  const events = await Promise.all(
-    types.map(async (type) => ({
-      type,
-      count: await prisma.analyticsEvent.count({ where: { type, createdAt: { gte: since } } }),
-    }))
-  );
-
-  return { events };
+  return { events: eventsRes.rows.map(r => ({ type: r.type, count: parseInt(r.count, 10) })) };
 };
 
 module.exports = {

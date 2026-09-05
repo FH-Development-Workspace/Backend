@@ -4,9 +4,9 @@ const DEFAULT_ORIGINS = [
   'https://fh-development.xyz',
   'https://www.fh-development.xyz',
   'https://dashboard.fh-development.xyz',
-  'https://backend-mczn.onrender.com',
   'http://localhost:3000',
   'http://localhost:3001',
+  'http://localhost:5000',
   'http://localhost:5500',
   'http://127.0.0.1:5500',
   'http://localhost:8080',
@@ -25,9 +25,7 @@ const parseOrigins = () => {
     .filter(Boolean);
 
   const origins = new Set(fromEnv);
-
   if (renderExternalUrl) origins.add(renderExternalUrl);
-
   return [...origins];
 };
 
@@ -49,8 +47,8 @@ const env = {
   directDatabaseUrl: process.env.DIRECT_URL,
 
   jwt: {
-    accessSecret: process.env.JWT_ACCESS_SECRET,
-    refreshSecret: process.env.JWT_REFRESH_SECRET,
+    accessSecret: process.env.JWT_ACCESS_SECRET || 'dev-access-secret-min32charslong-key-1234',
+    refreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-min32charslong-key-5678',
     accessExpires: process.env.JWT_ACCESS_EXPIRES || '15m',
     refreshExpires: process.env.JWT_REFRESH_EXPIRES || '7d',
   },
@@ -97,18 +95,7 @@ const env = {
     enabled: process.env.VAULT_ENABLED === 'true' && !!process.env.VAULT_DEVELOPER_KEY,
   },
 
-  hosting: {
-    paymentLinks: {
-      starter: process.env.STRIPE_HOSTING_STARTER_PAYMENT_LINK,
-      standard: process.env.STRIPE_HOSTING_STANDARD_PAYMENT_LINK,
-      premium: process.env.STRIPE_HOSTING_PREMIUM_PAYMENT_LINK,
-    },
-  },
-
-  stripe: {
-    secretKey: process.env.STRIPE_SECRET_KEY,
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-  },
+  hostingContactEmail: 'hosting@fh-development.xyz',
 
   seed: {
     adminEmail: process.env.SEED_ADMIN_EMAIL,
@@ -121,26 +108,11 @@ const required = [
   'DATABASE_URL',
   'JWT_ACCESS_SECRET',
   'JWT_REFRESH_SECRET',
-  'API_BASE_URL',
-  'FRONTEND_URL',
-  'ALLOWED_ORIGINS',
 ];
 if (env.isProduction) {
   for (const key of required) {
     if (!process.env[key]) {
       throw new Error(`Missing required environment variable: ${key}`);
-    }
-  }
-
-  if (env.cloudinary.enabled) {
-    for (const key of ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET']) {
-      if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
-    }
-  }
-
-  if (process.env.VAULT_ENABLED === 'true') {
-    for (const key of ['VAULT_API_BASE_URL', 'VAULT_DEVELOPER_KEY']) {
-      if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
     }
   }
 }

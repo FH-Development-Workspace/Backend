@@ -1,8 +1,9 @@
 const express = require('express');
-const { handleStripeWebhook } = require('../controllers/stripe.controller');
-
 const router = express.Router();
 
-router.post('/stripe', express.raw({ type: 'application/json', limit: '1mb' }), handleStripeWebhook);
+// Webhook routes placeholder (Stripe completely removed per manual hosting system requirements)
+router.use((req, res) => {
+  res.status(404).json({ message: 'Webhook endpoint unavailable' });
+});
 
 module.exports = router;

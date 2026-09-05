@@ -1,16 +1,32 @@
-# Database Setup
+# Database Setup & Migrations
 
-The backend uses PostgreSQL through Prisma. The current Neon connection string includes `&channel_binding=require`; quote both `DATABASE_URL` and `DIRECT_URL` in any shell or deployment configuration that parses environment assignments.
+The FH Developments backend uses native PostgreSQL via the `pg` driver with parameterized SQL queries.
 
-For a fresh or additive development schema:
+## Connection Configuration
 
-```text
-npx prisma validate
-npx prisma generate
-npx prisma db push --skip-generate
+Configure your PostgreSQL database connection in `.env`:
+```env
+DATABASE_URL="postgresql://user:password@host:5432/dbname?sslmode=require"
+```
+
+## Running Migrations
+
+Execute all pending SQL migrations:
+```bash
+npm run db:migrate
+```
+
+## Seeding Initial Data
+
+Seed system roles, permissions, hosting plans, and default administrative configurations:
+```bash
 npm run db:seed
 ```
 
-The schema contains users and sessions, products, licenses, support tickets, carts, purchases, blacklist entries, company content, and hosting plans/customers/orders/instances. The seed creates the real hosting plans and does not create fake customers or purchases. Set `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, and optionally `SEED_ADMIN_USERNAME` before seeding an administrator.
+## Resetting Development Database
 
-For production, prefer a reviewed Prisma migration and run `npm run db:migrate:deploy`; use `db push` only for controlled initial provisioning.
+> [!WARNING]
+> Database reset will drop all public tables and re-apply all migrations. This command will fail safely in production.
+```bash
+npm run db:reset
+```

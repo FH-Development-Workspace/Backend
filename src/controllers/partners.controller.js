@@ -1,12 +1,11 @@
-const prisma = require('../config/database');
-const { createUniqueSlug } = require('../utils/slug');
+const { query } = require('../config/database');
 const { sendSuccess } = require('../utils/response');
+const { AppError } = require('../middleware/error.middleware');
 
 const list = async (req, res, next) => {
   try {
-    const where = req.query.all === 'true' ? {} : { published: true };
-    const partners = await prisma.partner.findMany({ where, orderBy: { displayOrder: 'asc' } });
-    sendSuccess(res, { partners });
+    const resPartners = await query('SELECT * FROM partners ORDER BY created_at DESC');
+    sendSuccess(res, { partners: resPartners.rows });
   } catch (err) {
     next(err);
   }
@@ -14,9 +13,14 @@ const list = async (req, res, next) => {
 
 const create = async (req, res, next) => {
   try {
-    const slug = await createUniqueSlug(req.body.name, prisma.partner);
-    const partner = await prisma.partner.create({ data: { ...req.body, slug } });
-    sendSuccess(res, { partner }, 'Partner created', 201);
+    const { name, logoUrl, websiteUrl, description, tier } = req.body;
+    const resPartner = await query(`
+      INSERT INTO partners (name, logo_url, website_url, description, tier)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `, [name, logoUrl || null, websiteUrl || null, description || null, tier || null]);
+
+    sendSuccess(res, { partner: resPartner.rows[0] }, 'Partner created', 201);
   } catch (err) {
     next(err);
   }
@@ -24,8 +28,20 @@ const create = async (req, res, next) => {
 
 const update = async (req, res, next) => {
   try {
-    const partner = await prisma.partner.update({ where: { id: req.params.id }, data: req.body });
-    sendSuccess(res, { partner }, 'Partner updated');
+    const { name, logoUrl, websiteUrl, description, tier } = req.body;
+    const resPartner = await query(`
+      UPDATE partners
+      SET name = COALESCE($1, name),
+          logo_url = COALESCE($2, logo_url),
+          website_url = COALESCE($3, website_url),
+          description = COALESCE($4, description),
+          tier = COALESCE($5, tier)
+      WHERE id = $6
+      RETURNING *
+    `, [name, logoUrl, websiteUrl, description, tier, req.params.id]);
+
+    if (!resPartner.rows.length) throw new AppError('Partner not found', 404, 'NOT_FOUND');
+    sendSuccess(res, { partner: resPartner.rows[0] }, 'Partner updated');
   } catch (err) {
     next(err);
   }
@@ -33,7 +49,7 @@ const update = async (req, res, next) => {
 
 const remove = async (req, res, next) => {
   try {
-    await prisma.partner.delete({ where: { id: req.params.id } });
+    await query('DELETE FROM partners WHERE id = $1', [req.params.id]);
     sendSuccess(res, null, 'Partner deleted');
   } catch (err) {
     next(err);

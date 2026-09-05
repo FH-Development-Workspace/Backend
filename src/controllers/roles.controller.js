@@ -1,34 +1,48 @@
-const prisma = require('../config/database');
+const { query } = require('../config/database');
 const { sendSuccess } = require('../utils/response');
+const { AppError } = require('../middleware/error.middleware');
 
-const listRoles = async (req, res, next) => {
+const list = async (req, res, next) => {
   try {
-    const roles = await prisma.role.findMany({
-      include: {
-        permissions: { include: { permission: true } },
-        _count: { select: { users: true } },
-      },
-      orderBy: { name: 'asc' },
-    });
-    sendSuccess(res, { roles });
+    const resRoles = await query('SELECT * FROM roles ORDER BY name ASC');
+    sendSuccess(res, { roles: resRoles.rows });
   } catch (err) {
     next(err);
   }
 };
 
-const createRole = async (req, res, next) => {
+const create = async (req, res, next) => {
   try {
-    const role = await prisma.role.create({ data: req.body });
-    sendSuccess(res, { role }, 'Role created', 201);
+    const { name, description, department } = req.body;
+    const slug = (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
+
+    const resRole = await query(`
+      INSERT INTO roles (name, slug, description, department, is_system)
+      VALUES ($1, $2, $3, $4, false)
+      RETURNING *
+    `, [name, slug, description || null, department || null]);
+
+    sendSuccess(res, { role: resRole.rows[0] }, 'Role created', 201);
   } catch (err) {
     next(err);
   }
 };
 
-const updateRole = async (req, res, next) => {
+const update = async (req, res, next) => {
   try {
-    const role = await prisma.role.update({ where: { id: req.params.id }, data: req.body });
-    sendSuccess(res, { role }, 'Role updated');
+    const { name, description, department } = req.body;
+    const resRole = await query(`
+      UPDATE roles
+      SET name = COALESCE($1, name),
+          description = COALESCE($2, description),
+          department = COALESCE($3, department),
+          updated_at = NOW()
+      WHERE id = $4 AND is_system = false
+      RETURNING *
+    `, [name, description, department, req.params.id]);
+
+    if (!resRole.rows.length) throw new AppError('Role not found or is a protected system role', 400, 'BAD_REQUEST');
+    sendSuccess(res, { role: resRole.rows[0] }, 'Role updated');
   } catch (err) {
     next(err);
   }
@@ -37,20 +51,37 @@ const updateRole = async (req, res, next) => {
 const assignPermissions = async (req, res, next) => {
   try {
     const { permissionIds } = req.body;
-    await prisma.rolePermission.deleteMany({ where: { roleId: req.params.id } });
+    const roleId = req.params.id;
+
+    await query('DELETE FROM role_permissions WHERE role_id = $1', [roleId]);
     if (permissionIds?.length) {
-      await prisma.rolePermission.createMany({
-        data: permissionIds.map((permissionId) => ({ roleId: req.params.id, permissionId })),
-      });
+      for (const pId of permissionIds) {
+        await query('INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [roleId, pId]);
+      }
     }
-    const role = await prisma.role.findUnique({
-      where: { id: req.params.id },
-      include: { permissions: { include: { permission: true } } },
-    });
-    sendSuccess(res, { role }, 'Permissions updated');
+
+    sendSuccess(res, null, 'Permissions assigned');
   } catch (err) {
     next(err);
   }
 };
 
-module.exports = { listRoles, createRole, updateRole, assignPermissions };
+const remove = async (req, res, next) => {
+  try {
+    await query('DELETE FROM roles WHERE id = $1 AND is_system = false', [req.params.id]);
+    sendSuccess(res, null, 'Role deleted');
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = {
+  list,
+  listRoles: list,
+  create,
+  createRole: create,
+  update,
+  updateRole: update,
+  assignPermissions,
+  remove,
+};

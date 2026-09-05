@@ -1,16 +1,17 @@
-const prisma = require('../config/database');
+const { query } = require('../config/database');
 const authService = require('../services/auth.service');
-const downloadService = require('../services/download.service');
 const licenseService = require('../services/license.service');
+const downloadService = require('../services/download.service');
 const notificationService = require('../services/notification.service');
 const { sendSuccess, sendPaginated } = require('../utils/response');
+const { sanitizeUser } = require('../utils/permissions');
 const { getPagination, buildPaginationMeta } = require('../utils/pagination');
 const { AppError } = require('../middleware/error.middleware');
 
 const getAccount = async (req, res, next) => {
   try {
     const user = await authService.getMe(req.user.id);
-    sendSuccess(res, { user, permissions: req.userPermissions, roles: req.userRoles });
+    sendSuccess(res, { user: sanitizeUser(user) });
   } catch (err) {
     next(err);
   }
@@ -18,18 +19,21 @@ const getAccount = async (req, res, next) => {
 
 const updateAccount = async (req, res, next) => {
   try {
-    const { email, username } = req.body;
-    const data = {};
-    if (email) data.email = email;
-    if (username) data.username = username;
+    const { username, email } = req.body;
+    const userId = req.user.id;
 
-    const user = await prisma.user.update({
-      where: { id: req.user.id },
-      data,
-      include: { profile: true },
-    });
-    const { passwordHash: _, ...safe } = user;
-    sendSuccess(res, { user: safe }, 'Account updated');
+    if (username || email) {
+      await query(`
+        UPDATE users
+        SET username = COALESCE($1, username),
+            email = COALESCE($2, email),
+            updated_at = NOW()
+        WHERE id = $3
+      `, [username, email, userId]);
+    }
+
+    const user = await authService.getMe(userId);
+    sendSuccess(res, { user: sanitizeUser(user) }, 'Account updated');
   } catch (err) {
     next(err);
   }
@@ -37,12 +41,25 @@ const updateAccount = async (req, res, next) => {
 
 const updateProfile = async (req, res, next) => {
   try {
-    const profile = await prisma.profile.upsert({
-      where: { userId: req.user.id },
-      create: { userId: req.user.id, ...req.body },
-      update: req.body,
-    });
-    sendSuccess(res, { profile }, 'Profile updated');
+    const { firstName, lastName, displayName, avatar, bio, company, website } = req.body;
+    const userId = req.user.id;
+
+    await query(`
+      INSERT INTO profiles (user_id, first_name, last_name, display_name, avatar, bio, company, website)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (user_id) DO UPDATE
+      SET first_name = COALESCE(EXCLUDED.first_name, profiles.first_name),
+          last_name = COALESCE(EXCLUDED.last_name, profiles.last_name),
+          display_name = COALESCE(EXCLUDED.display_name, profiles.display_name),
+          avatar = COALESCE(EXCLUDED.avatar, profiles.avatar),
+          bio = COALESCE(EXCLUDED.bio, profiles.bio),
+          company = COALESCE(EXCLUDED.company, profiles.company),
+          website = COALESCE(EXCLUDED.website, profiles.website),
+          updated_at = NOW()
+    `, [userId, firstName || null, lastName || null, displayName || null, avatar || null, bio || null, company || null, website || null]);
+
+    const updatedUser = await authService.getMe(userId);
+    sendSuccess(res, { user: sanitizeUser(updatedUser) }, 'Profile updated');
   } catch (err) {
     next(err);
   }
@@ -50,13 +67,19 @@ const updateProfile = async (req, res, next) => {
 
 const changePassword = async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-    const valid = await authService.comparePassword(req.body.currentPassword, user.passwordHash);
-    if (!valid) throw new AppError('Current password is incorrect', 400, 'INVALID_PASSWORD');
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.id;
 
-    const passwordHash = await authService.hashPassword(req.body.newPassword);
-    await prisma.user.update({ where: { id: req.user.id }, data: { passwordHash } });
-    sendSuccess(res, null, 'Password changed successfully');
+    const userRes = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+    if (!userRes.rows.length) throw new AppError('User not found', 404, 'NOT_FOUND');
+
+    const isValid = await authService.comparePassword(currentPassword, userRes.rows[0].password_hash);
+    if (!isValid) throw new AppError('Current password incorrect', 400, 'INVALID_PASSWORD');
+
+    const newHash = await authService.hashPassword(newPassword);
+    await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, userId]);
+
+    sendSuccess(res, null, 'Password updated successfully');
   } catch (err) {
     next(err);
   }
@@ -64,23 +87,16 @@ const changePassword = async (req, res, next) => {
 
 const deleteAccount = async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-    const valid = await authService.comparePassword(req.body.currentPassword, user.passwordHash);
-    if (!valid) throw new AppError('Current password is incorrect', 400, 'INVALID_PASSWORD');
+    const { currentPassword } = req.body;
+    const userId = req.user.id;
 
-    const suffix = `${user.id}.${Date.now()}`;
-    await prisma.$transaction([
-      prisma.session.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } }),
-      prisma.user.update({
-        where: { id: user.id },
-        data: {
-          status: 'DELETED',
-          deletedAt: new Date(),
-          username: `deleted-${suffix}`,
-          email: `deleted-${suffix}@invalid.local`,
-        },
-      }),
-    ]);
+    const userRes = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+    if (!userRes.rows.length) throw new AppError('User not found', 404, 'NOT_FOUND');
+
+    const isValid = await authService.comparePassword(currentPassword, userRes.rows[0].password_hash);
+    if (!isValid) throw new AppError('Current password incorrect', 400, 'INVALID_PASSWORD');
+
+    await query("UPDATE users SET status = 'DELETED', deleted_at = NOW(), deleted_by = $1 WHERE id = $1", [userId]);
     sendSuccess(res, null, 'Account deleted');
   } catch (err) {
     next(err);
@@ -89,12 +105,13 @@ const deleteAccount = async (req, res, next) => {
 
 const getSessions = async (req, res, next) => {
   try {
-    const sessions = await prisma.session.findMany({
-      where: { userId: req.user.id, revokedAt: null, expiresAt: { gt: new Date() } },
-      select: { id: true, userAgent: true, ipAddress: true, createdAt: true, expiresAt: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    sendSuccess(res, { sessions });
+    const sessionsRes = await query(`
+      SELECT id, user_agent, ip_address, expires_at, created_at
+      FROM sessions
+      WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+      ORDER BY created_at DESC
+    `, [req.user.id]);
+    sendSuccess(res, { sessions: sessionsRes.rows });
   } catch (err) {
     next(err);
   }
@@ -102,10 +119,7 @@ const getSessions = async (req, res, next) => {
 
 const revokeSession = async (req, res, next) => {
   try {
-    await prisma.session.updateMany({
-      where: { id: req.params.id, userId: req.user.id },
-      data: { revokedAt: new Date() },
-    });
+    await query("UPDATE sessions SET revoked_at = NOW() WHERE id = $1 AND user_id = $2", [req.params.id, req.user.id]);
     sendSuccess(res, null, 'Session revoked');
   } catch (err) {
     next(err);
@@ -114,9 +128,9 @@ const revokeSession = async (req, res, next) => {
 
 const getDownloads = async (req, res, next) => {
   try {
-    const { page, limit, skip } = getPagination(req.query);
-    const { items, total } = await downloadService.getUserDownloads(req.user.id, { skip, limit });
-    sendPaginated(res, items, buildPaginationMeta(page, limit, total));
+    const { limit, skip } = getPagination(req.query);
+    const downloads = await downloadService.getUserDownloads(req.user.id, { limit, skip });
+    sendSuccess(res, downloads);
   } catch (err) {
     next(err);
   }
@@ -125,8 +139,8 @@ const getDownloads = async (req, res, next) => {
 const getLicenses = async (req, res, next) => {
   try {
     const { page, limit, skip } = getPagination(req.query);
-    const { items, total } = await licenseService.getUserLicenses(req.user.id, { skip, limit });
-    sendPaginated(res, items, buildPaginationMeta(page, limit, total));
+    const result = await licenseService.getUserLicenses(req.user.id, { limit, skip });
+    sendPaginated(res, result.items, buildPaginationMeta(page, limit, result.total));
   } catch (err) {
     next(err);
   }
@@ -135,21 +149,20 @@ const getLicenses = async (req, res, next) => {
 const getSupportTickets = async (req, res, next) => {
   try {
     const { page, limit, skip } = getPagination(req.query);
-    const where = { userId: req.user.id, deletedAt: null };
-    const [items, total] = await Promise.all([
-      prisma.supportTicket.findMany({
-        where,
-        orderBy: { updatedAt: 'desc' },
-        skip,
-        take: limit,
-        select: {
-          id: true, ticketNumber: true, subject: true, status: true,
-          priority: true, createdAt: true, updatedAt: true,
-        },
-      }),
-      prisma.supportTicket.count({ where }),
-    ]);
-    sendPaginated(res, items, buildPaginationMeta(page, limit, total));
+    const countRes = await query('SELECT COUNT(*) FROM support_tickets WHERE user_id = $1', [req.user.id]);
+    const total = parseInt(countRes.rows[0].count, 10);
+
+    const itemsRes = await query(`
+      SELECT st.*, COUNT(tm.id) as "messageCount"
+      FROM support_tickets st
+      LEFT JOIN ticket_messages tm ON tm.ticket_id = st.id
+      WHERE st.user_id = $1
+      GROUP BY st.id
+      ORDER BY st.updated_at DESC
+      LIMIT $2 OFFSET $3
+    `, [req.user.id, limit, skip]);
+
+    sendPaginated(res, itemsRes.rows, buildPaginationMeta(page, limit, total));
   } catch (err) {
     next(err);
   }
@@ -157,11 +170,9 @@ const getSupportTickets = async (req, res, next) => {
 
 const getNotifications = async (req, res, next) => {
   try {
-    const { page, limit, skip } = getPagination(req.query);
-    const { items, total } = await notificationService.getUserNotifications(req.user.id, {
-      skip, limit, page, unreadOnly: req.query.unread === 'true',
-    });
-    sendPaginated(res, items, buildPaginationMeta(page, limit, total));
+    const { limit, skip } = getPagination(req.query);
+    const result = await notificationService.getUserNotifications(req.user.id, { limit, skip });
+    sendSuccess(res, result);
   } catch (err) {
     next(err);
   }

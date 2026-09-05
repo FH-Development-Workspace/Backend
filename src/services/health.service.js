@@ -1,4 +1,4 @@
-const prisma = require('../config/database');
+const { query } = require('../config/database');
 const env = require('../config/environment');
 const storageService = require('./storage.service');
 
@@ -10,7 +10,7 @@ const withTimeout = (promise, ms = 5000) =>
 
 const checkDatabase = async () => {
   try {
-    await withTimeout(prisma.$queryRaw`SELECT 1`);
+    await withTimeout(query('SELECT 1'));
     return 'OPERATIONAL';
   } catch {
     return 'DOWN';
@@ -26,7 +26,8 @@ const checkStorage = () => {
 
 const checkHosting = async () => {
   try {
-    const activePlans = await withTimeout(prisma.hostingPlan.count({ where: { active: true } }), 1500);
+    const res = await withTimeout(query("SELECT COUNT(*) FROM hosting_plans WHERE active = true"), 1500);
+    const activePlans = parseInt(res.rows[0].count, 10);
     return activePlans > 0 ? 'OPERATIONAL' : 'DEGRADED';
   } catch {
     return 'DOWN';

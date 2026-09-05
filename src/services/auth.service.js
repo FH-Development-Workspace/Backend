@@ -1,5 +1,5 @@
 const bcrypt = require('bcrypt');
-const prisma = require('../config/database');
+const { query, transaction } = require('../config/database');
 const env = require('../config/environment');
 const {
   signAccessToken,
@@ -25,102 +25,142 @@ const parseExpiry = (expiresStr) => {
   return parseInt(num, 10) * multipliers[unit];
 };
 
+const formatUser = (userRow, profileRow = null, roles = []) => {
+  if (!userRow) return null;
+  return {
+    id: userRow.id,
+    username: userRow.username,
+    email: userRow.email,
+    emailVerified: userRow.email_verified,
+    status: userRow.status,
+    lastLoginAt: userRow.last_login_at,
+    createdAt: userRow.created_at,
+    updatedAt: userRow.updated_at,
+    profile: profileRow ? {
+      id: profileRow.id,
+      firstName: profileRow.first_name,
+      lastName: profileRow.last_name,
+      displayName: profileRow.display_name,
+      avatar: profileRow.avatar,
+      bio: profileRow.bio,
+      company: profileRow.company,
+      website: profileRow.website,
+    } : null,
+    roles: roles.map(r => typeof r === 'string' ? r : r.slug),
+  };
+};
+
+const getUserWithProfileAndRoles = async (userId) => {
+  const userRes = await query('SELECT * FROM users WHERE id = $1', [userId]);
+  if (!userRes.rows.length) return null;
+  const userRow = userRes.rows[0];
+
+  const profileRes = await query('SELECT * FROM profiles WHERE user_id = $1', [userId]);
+  const profileRow = profileRes.rows[0] || null;
+
+  const rolesRes = await query(`
+    SELECT r.slug FROM roles r
+    JOIN user_roles ur ON ur.role_id = r.id
+    WHERE ur.user_id = $1
+  `, [userId]);
+  const roles = rolesRes.rows.map(r => r.slug);
+
+  return formatUser(userRow, profileRow, roles);
+};
+
 const createSession = async (userId, req) => {
   const refreshToken = signRefreshToken({ userId, sessionId: generateSecureToken(16) });
   const expiresAt = new Date(Date.now() + parseExpiry(env.jwt.refreshExpires));
 
-  const session = await prisma.session.create({
-    data: {
-      userId,
-      refreshToken,
-      userAgent: req.headers['user-agent'] || null,
-      ipAddress: req.ip,
-      expiresAt,
-    },
-  });
+  const res = await query(`
+    INSERT INTO sessions (user_id, refresh_token, user_agent, ip_address, expires_at)
+    VALUES ($1, $2, $3, $4, $5)
+    RETURNING *
+  `, [userId, refreshToken, req.headers['user-agent'] || null, req.ip, expiresAt]);
 
-  return { session, refreshToken };
+  return { session: res.rows[0], refreshToken };
 };
 
 const issueTokens = (user) => {
-  const accessToken = signAccessToken({ userId: user.id, email: user.email });
+  const accessToken = signAccessToken({ userId: user.id, email: user.email, roles: user.roles });
   return { accessToken };
 };
 
 const register = async (data, req) => {
-  const existing = await prisma.user.findFirst({
-    where: { OR: [{ email: data.email }, { username: data.username }] },
-  });
-  if (existing) {
+  const existing = await query(
+    'SELECT id FROM users WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($2)',
+    [data.email, data.username]
+  );
+  if (existing.rows.length > 0) {
     throw new AppError('Email or username already in use', 409, 'CONFLICT');
   }
 
   const passwordHash = await hashPassword(data.password);
-  const user = await prisma.user.create({
-    data: {
-      username: data.username,
-      email: data.email,
-      passwordHash,
-      status: 'PENDING',
-      profile: {
-        create: {
-          firstName: data.firstName,
-          lastName: data.lastName,
-          displayName: data.displayName || data.username,
-        },
-      },
-    },
-    include: { profile: true },
+
+  return await transaction(async (client) => {
+    const userRes = await client.query(`
+      INSERT INTO users (username, email, password_hash, status)
+      VALUES ($1, $2, $3, 'PENDING')
+      RETURNING *
+    `, [data.username, data.email, passwordHash]);
+
+    const userRow = userRes.rows[0];
+
+    const profileRes = await client.query(`
+      INSERT INTO profiles (user_id, first_name, last_name, display_name)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [userRow.id, data.firstName || null, data.lastName || null, data.displayName || data.username]);
+
+    const roleRes = await client.query(`SELECT id FROM roles WHERE slug = 'user'`);
+    if (roleRes.rows.length > 0) {
+      await client.query(`
+        INSERT INTO user_roles (user_id, role_id)
+        VALUES ($1, $2)
+      `, [userRow.id, roleRes.rows[0].id]);
+    }
+
+    const token = generateSecureToken();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await client.query(`
+      INSERT INTO email_verification_tokens (user_id, token, expires_at)
+      VALUES ($1, $2, $3)
+    `, [userRow.id, token, expiresAt]);
+
+    const verifyLink = `${env.frontendUrl}/verify-email?token=${token}`;
+    await emailService.sendTemplate(userRow.email, 'emailVerification', {
+      name: data.displayName || data.username,
+      link: verifyLink,
+    });
+
+    await analyticsService.logEvent('REGISTER', { userId: userRow.id, ipAddress: req.ip });
+
+    return formatUser(userRow, profileRes.rows[0], ['user']);
   });
-
-  const userRole = await prisma.role.findUnique({ where: { slug: 'user' } });
-  if (userRole) {
-    await prisma.userRole.create({ data: { userId: user.id, roleId: userRole.id } });
-  }
-
-  const token = generateSecureToken();
-  await prisma.emailVerificationToken.create({
-    data: {
-      userId: user.id,
-      token,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-    },
-  });
-
-  const verifyLink = `${env.frontendUrl}/verify-email?token=${token}`;
-  await emailService.sendTemplate(user.email, 'emailVerification', {
-    name: user.profile?.displayName || user.username,
-    link: verifyLink,
-  });
-
-  await analyticsService.logEvent('REGISTER', { userId: user.id, ipAddress: req.ip });
-
-  const { passwordHash: _, ...safeUser } = user;
-  return safeUser;
 };
 
 const login = async (data, req) => {
-  const user = await prisma.user.findUnique({
-    where: { email: data.email },
-    include: { profile: true },
-  });
-
-  if (!user || !(await comparePassword(data.password, user.passwordHash))) {
+  const userRes = await query('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [data.email]);
+  if (!userRes.rows.length) {
     throw new AppError('Invalid credentials', 401, 'INVALID_CREDENTIALS');
   }
 
-  if (user.status === 'BANNED' || user.status === 'DELETED') {
+  const userRow = userRes.rows[0];
+  if (!(await comparePassword(data.password, userRow.password_hash))) {
+    throw new AppError('Invalid credentials', 401, 'INVALID_CREDENTIALS');
+  }
+
+  if (userRow.status === 'BANNED' || userRow.status === 'DELETED') {
     throw new AppError('Account not available', 403, 'ACCOUNT_UNAVAILABLE');
   }
 
-  if (user.status === 'SUSPENDED') {
+  if (userRow.status === 'SUSPENDED') {
     throw new AppError('Account suspended', 403, 'ACCOUNT_SUSPENDED');
   }
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { lastLoginAt: new Date() },
-  });
+  await query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [userRow.id]);
+
+  const user = await getUserWithProfileAndRoles(userRow.id);
 
   const { session, refreshToken } = await createSession(user.id, req);
   const { accessToken } = issueTokens(user);
@@ -132,16 +172,12 @@ const login = async (data, req) => {
 
   await analyticsService.logEvent('LOGIN', { userId: user.id, ipAddress: req.ip });
 
-  const { passwordHash: _, ...safeUser } = user;
-  return { user: safeUser, accessToken, refreshToken };
+  return { user, accessToken, refreshToken };
 };
 
 const logout = async (refreshToken) => {
   if (!refreshToken) return;
-  await prisma.session.updateMany({
-    where: { refreshToken, revokedAt: null },
-    data: { revokedAt: new Date() },
-  });
+  await query('UPDATE sessions SET revoked_at = NOW() WHERE refresh_token = $1 AND revoked_at IS NULL', [refreshToken]);
 };
 
 const refresh = async (refreshToken, req) => {
@@ -152,74 +188,65 @@ const refresh = async (refreshToken, req) => {
     throw new AppError('Invalid refresh token', 401, 'INVALID_TOKEN');
   }
 
-  const session = await prisma.session.findUnique({
-    where: { refreshToken },
-    include: { user: { include: { profile: true } } },
-  });
+  const sessionRes = await query('SELECT * FROM sessions WHERE refresh_token = $1', [refreshToken]);
+  if (!sessionRes.rows.length) {
+    throw new AppError('Session not found', 401, 'SESSION_EXPIRED');
+  }
 
-  if (!session || session.revokedAt || session.expiresAt < new Date()) {
+  const session = sessionRes.rows[0];
+  if (session.revoked_at || new Date(session.expires_at) < new Date()) {
     throw new AppError('Session expired', 401, 'SESSION_EXPIRED');
   }
 
-  await prisma.session.update({
-    where: { id: session.id },
-    data: { revokedAt: new Date() },
-  });
+  await query('UPDATE sessions SET revoked_at = NOW() WHERE id = $1', [session.id]);
 
-  const { session: newSession, refreshToken: newRefreshToken } = await createSession(
-    session.userId,
-    req
-  );
-  const { accessToken } = issueTokens(session.user);
+  const user = await getUserWithProfileAndRoles(session.user_id);
+  if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
 
-  const { passwordHash: _, ...safeUser } = session.user;
-  return { user: safeUser, accessToken, refreshToken: newRefreshToken };
+  const { session: newSession, refreshToken: newRefreshToken } = await createSession(session.user_id, req);
+  const { accessToken } = issueTokens(user);
+
+  return { user, accessToken, refreshToken: newRefreshToken };
 };
 
 const verifyEmail = async (token) => {
-  const record = await prisma.emailVerificationToken.findUnique({
-    where: { token },
-    include: { user: true },
-  });
-
-  if (!record || record.usedAt || record.expiresAt < new Date()) {
+  const tokenRes = await query('SELECT * FROM email_verification_tokens WHERE token = $1', [token]);
+  if (!tokenRes.rows.length) {
     throw new AppError('Invalid or expired verification token', 400, 'INVALID_TOKEN');
   }
 
-  await prisma.$transaction([
-    prisma.emailVerificationToken.update({
-      where: { id: record.id },
-      data: { usedAt: new Date() },
-    }),
-    prisma.user.update({
-      where: { id: record.userId },
-      data: { emailVerified: true, status: 'ACTIVE' },
-    }),
-  ]);
+  const record = tokenRes.rows[0];
+  if (record.used_at || new Date(record.expires_at) < new Date()) {
+    throw new AppError('Invalid or expired verification token', 400, 'INVALID_TOKEN');
+  }
 
-  await emailService.sendTemplate(record.user.email, 'welcome', {
-    name: record.user.username,
+  await transaction(async (client) => {
+    await client.query('UPDATE email_verification_tokens SET used_at = NOW() WHERE id = $1', [record.id]);
+    await client.query("UPDATE users SET email_verified = true, status = 'ACTIVE' WHERE id = $1", [record.user_id]);
   });
+
+  const userRes = await query('SELECT * FROM users WHERE id = $1', [record.user_id]);
+  if (userRes.rows.length > 0) {
+    await emailService.sendTemplate(userRes.rows[0].email, 'welcome', {
+      name: userRes.rows[0].username,
+    });
+  }
 
   return { verified: true };
 };
 
 const resendVerification = async (email) => {
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || user.emailVerified) {
+  const userRes = await query('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email]);
+  if (!userRes.rows.length || userRes.rows[0].email_verified) {
     return { sent: true };
   }
 
-  await prisma.emailVerificationToken.deleteMany({ where: { userId: user.id } });
+  const user = userRes.rows[0];
+  await query('DELETE FROM email_verification_tokens WHERE user_id = $1', [user.id]);
 
   const token = generateSecureToken();
-  await prisma.emailVerificationToken.create({
-    data: {
-      userId: user.id,
-      token,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-    },
-  });
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  await query('INSERT INTO email_verification_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)', [user.id, token, expiresAt]);
 
   const verifyLink = `${env.frontendUrl}/verify-email?token=${token}`;
   await emailService.sendTemplate(user.email, 'emailVerification', {
@@ -231,19 +258,15 @@ const resendVerification = async (email) => {
 };
 
 const forgotPassword = async (email) => {
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) return { sent: true };
+  const userRes = await query('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email]);
+  if (!userRes.rows.length) return { sent: true };
 
-  await prisma.passwordResetToken.deleteMany({ where: { userId: user.id } });
+  const user = userRes.rows[0];
+  await query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]);
 
   const token = generateSecureToken();
-  await prisma.passwordResetToken.create({
-    data: {
-      userId: user.id,
-      token,
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-    },
-  });
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+  await query('INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)', [user.id, token, expiresAt]);
 
   const resetLink = `${env.frontendUrl}/reset-password?token=${token}`;
   await emailService.sendTemplate(user.email, 'passwordReset', {
@@ -255,42 +278,31 @@ const forgotPassword = async (email) => {
 };
 
 const resetPassword = async (token, newPassword) => {
-  const record = await prisma.passwordResetToken.findUnique({
-    where: { token },
-  });
+  const tokenRes = await query('SELECT * FROM password_reset_tokens WHERE token = $1', [token]);
+  if (!tokenRes.rows.length) {
+    throw new AppError('Invalid or expired reset token', 400, 'INVALID_TOKEN');
+  }
 
-  if (!record || record.usedAt || record.expiresAt < new Date()) {
+  const record = tokenRes.rows[0];
+  if (record.used_at || new Date(record.expires_at) < new Date()) {
     throw new AppError('Invalid or expired reset token', 400, 'INVALID_TOKEN');
   }
 
   const passwordHash = await hashPassword(newPassword);
 
-  await prisma.$transaction([
-    prisma.passwordResetToken.update({
-      where: { id: record.id },
-      data: { usedAt: new Date() },
-    }),
-    prisma.user.update({
-      where: { id: record.userId },
-      data: { passwordHash },
-    }),
-    prisma.session.updateMany({
-      where: { userId: record.userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    }),
-  ]);
+  await transaction(async (client) => {
+    await client.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1', [record.id]);
+    await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, record.user_id]);
+    await client.query('UPDATE sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL', [record.user_id]);
+  });
 
   return { reset: true };
 };
 
 const getMe = async (userId) => {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { profile: true },
-  });
+  const user = await getUserWithProfileAndRoles(userId);
   if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
-  const { passwordHash: _, ...safeUser } = user;
-  return safeUser;
+  return user;
 };
 
 module.exports = {

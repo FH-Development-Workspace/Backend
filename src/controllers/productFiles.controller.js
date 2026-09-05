@@ -1,16 +1,35 @@
-const prisma = require('../config/database');
+const { query } = require('../config/database');
 const storageService = require('../services/storage.service');
-const auditService = require('../services/audit.service');
 const { sendSuccess } = require('../utils/response');
 const { AppError } = require('../middleware/error.middleware');
 
 const list = async (req, res, next) => {
   try {
-    const where = { productId: req.params.productId, archived: false };
-    if (req.params.versionId) where.versionId = req.params.versionId;
+    const id = req.params.versionId || req.params.productId;
+    const resFiles = await query(`
+      SELECT pf.* FROM product_files pf
+      JOIN product_versions pv ON pf.version_id = pv.id
+      WHERE pv.product_id = $1 OR pf.version_id = $1
+      ORDER BY pf.created_at DESC
+    `, [id]);
+    sendSuccess(res, { files: resFiles.rows });
+  } catch (err) {
+    next(err);
+  }
+};
 
-    const files = await prisma.productFile.findMany({ where, orderBy: { createdAt: 'desc' } });
-    sendSuccess(res, { files });
+const create = async (req, res, next) => {
+  try {
+    const { fileName, filePath, fileSize, mimeType, visibility, versionId } = req.body;
+    const vId = req.params.versionId || versionId;
+
+    const resFile = await query(`
+      INSERT INTO product_files (version_id, file_name, file_path, file_size, mime_type, visibility)
+      VALUES ($1, $2, $3, COALESCE($4, 0), $5, COALESCE($6, 'LICENSED'))
+      RETURNING *
+    `, [vId, fileName, filePath, fileSize, mimeType || null, visibility]);
+
+    sendSuccess(res, { file: resFile.rows[0] }, 'Product file created', 201);
   } catch (err) {
     next(err);
   }
@@ -18,33 +37,26 @@ const list = async (req, res, next) => {
 
 const upload = async (req, res, next) => {
   try {
-    if (!req.file) throw new AppError('No file uploaded', 400, 'NO_FILE');
+    if (!req.file) throw new AppError('File required', 400, 'BAD_REQUEST');
+    const storageResult = await storageService.upload(req.file, 'products');
 
-    const result = await storageService.upload(req.file, `products/${req.params.productId}`);
+    const { versionId, visibility } = req.body;
+    const vId = req.params.versionId || versionId;
 
-    const file = await prisma.productFile.create({
-      data: {
-        productId: req.params.productId,
-        versionId: req.body.versionId || null,
-        fileName: req.file.originalname,
-        storageKey: result.storageKey,
-        fileSize: result.fileSize,
-        mimeType: result.mimeType,
-        checksum: result.checksum,
-        visibility: req.body.visibility || 'AUTHENTICATED',
-        platform: req.body.platform || null,
-      },
-    });
+    const resFile = await query(`
+      INSERT INTO product_files (version_id, file_name, file_path, file_size, mime_type, visibility)
+      VALUES ($1, $2, $3, $4, $5, COALESCE($6, 'LICENSED'))
+      RETURNING *
+    `, [
+      vId,
+      req.file.originalname,
+      storageResult.storageKey,
+      req.file.size,
+      req.file.mimetype,
+      visibility,
+    ]);
 
-    await auditService.log({
-      actorId: req.user.id,
-      action: 'FILE_UPLOADED',
-      resource: 'product_file',
-      resourceId: file.id,
-      ipAddress: req.ip,
-    });
-
-    sendSuccess(res, { file }, 'File uploaded', 201);
+    sendSuccess(res, { file: resFile.rows[0] }, 'File uploaded', 201);
   } catch (err) {
     next(err);
   }
@@ -52,19 +64,11 @@ const upload = async (req, res, next) => {
 
 const remove = async (req, res, next) => {
   try {
-    const file = await prisma.productFile.findUnique({ where: { id: req.params.id } });
-    if (!file) throw new AppError('File not found', 404, 'NOT_FOUND');
-
-    await storageService.deleteFile(file.storageKey);
-    await prisma.productFile.update({
-      where: { id: req.params.id },
-      data: { archived: true },
-    });
-
-    sendSuccess(res, null, 'File archived');
+    await query('DELETE FROM product_files WHERE id = $1', [req.params.id]);
+    sendSuccess(res, null, 'File deleted');
   } catch (err) {
     next(err);
   }
 };
 
-module.exports = { list, upload, remove };
+module.exports = { list, create, upload, remove };

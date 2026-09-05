@@ -1,47 +1,67 @@
-const prisma = require('../config/database');
-const { AppError } = require('../middleware/error.middleware');
+const { query } = require('../config/database');
 const { sendSuccess } = require('../utils/response');
-
-const publicWhere = (type) => ({ type, published: true, OR: [{ publishedAt: null }, { publishedAt: { lte: new Date() } }] });
+const { AppError } = require('../middleware/error.middleware');
 
 const list = async (req, res, next) => {
   try {
-    const entries = await prisma.contentEntry.findMany({ where: publicWhere(req.contentType), orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }] });
+    const type = req.contentType || 'general';
+    const resEntries = await query('SELECT key as id, value FROM system_settings WHERE key LIKE $1', [`content_${type}_%`]);
+    const entries = resEntries.rows.map(r => ({ id: r.id, ...(typeof r.value === 'string' ? JSON.parse(r.value) : r.value) }));
     sendSuccess(res, { entries });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
 const listAdmin = async (req, res, next) => {
-  try {
-    const entries = await prisma.contentEntry.findMany({ where: { type: req.contentType }, orderBy: { updatedAt: 'desc' } });
-    sendSuccess(res, { entries });
-  } catch (err) { next(err); }
+  return list(req, res, next);
 };
 
 const create = async (req, res, next) => {
   try {
-    const data = { ...req.body, type: req.contentType, publishedAt: req.body.publishedAt ? new Date(req.body.publishedAt) : undefined, createdBy: req.user.id };
-    const entry = await prisma.contentEntry.create({ data });
-    sendSuccess(res, { entry }, 'Content entry created', 201);
-  } catch (err) { next(err); }
+    const type = req.contentType || req.body.type || 'general';
+    const key = `content_${type}_${Date.now()}`;
+    const value = JSON.stringify({ ...req.body, type });
+
+    await query(`
+      INSERT INTO system_settings (key, value)
+      VALUES ($1, $2)
+      ON CONFLICT (key) DO UPDATE
+      SET value = EXCLUDED.value, updated_at = NOW()
+    `, [key, value]);
+
+    sendSuccess(res, { entry: { id: key, ...req.body, type } }, 'Content entry created', 201);
+  } catch (err) {
+    next(err);
+  }
 };
 
 const update = async (req, res, next) => {
   try {
-    const entry = await prisma.contentEntry.findFirst({ where: { id: req.params.id, type: req.contentType } });
-    if (!entry) throw new AppError('Content entry not found', 404, 'NOT_FOUND');
-    const data = { ...req.body, publishedAt: req.body.publishedAt ? new Date(req.body.publishedAt) : undefined };
-    const updated = await prisma.contentEntry.update({ where: { id: entry.id }, data });
-    sendSuccess(res, { entry: updated }, 'Content entry updated');
-  } catch (err) { next(err); }
+    const key = req.params.id;
+    const value = JSON.stringify(req.body);
+
+    const resEntry = await query(`
+      UPDATE system_settings
+      SET value = $1, updated_at = NOW()
+      WHERE key = $2
+      RETURNING *
+    `, [value, key]);
+
+    if (!resEntry.rows.length) throw new AppError('Content entry not found', 404, 'NOT_FOUND');
+    sendSuccess(res, { entry: { id: key, ...req.body } }, 'Content entry updated');
+  } catch (err) {
+    next(err);
+  }
 };
 
 const remove = async (req, res, next) => {
   try {
-    const result = await prisma.contentEntry.deleteMany({ where: { id: req.params.id, type: req.contentType } });
-    if (!result.count) throw new AppError('Content entry not found', 404, 'NOT_FOUND');
+    await query('DELETE FROM system_settings WHERE key = $1', [req.params.id]);
     sendSuccess(res, null, 'Content entry deleted');
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-module.exports = { list, listAdmin, create, update, remove };
+module.exports = { list, listAdmin, create, update, upsert: create, remove };
