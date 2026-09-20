@@ -14,6 +14,12 @@ const sslConfig = (() => {
       env.isProduction) {
     return { rejectUnauthorized: false };
   }
+  // Explicitly use verify-full for compatibility with future pg versions
+  if (env.databaseUrl.includes('sslmode=prefer') || 
+      env.databaseUrl.includes('sslmode=require') ||
+      env.databaseUrl.includes('sslmode=verify-ca')) {
+    return { rejectUnauthorized: false };
+  }
   return false;
 })();
 

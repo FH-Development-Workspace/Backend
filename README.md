@@ -9,7 +9,7 @@ Full-stack production API providing identity, commerce, hosting requests, docume
 - **Authentication**: JWT Access & Refresh Tokens, bcrypt password hashing, role-based access control
 - **Storage**: Cloudinary & local disk storage abstraction
 - **Integrations**: SpaceMail SMTP, Roblox Vault API
-- **Hosting System**: Manual review and provisioning workflow (zero Stripe dependencies)
+- **Hosting System**: Manual review and provisioning workflow
 
 ## Getting Started
 

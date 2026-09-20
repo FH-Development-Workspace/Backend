@@ -40,7 +40,20 @@ exports.getPlan = async (req, res) => {
 
 exports.requestHosting = async (req, res) => {
   try {
-    const { planId, serviceName, repoUrl, environmentNotes, additionalNotes } = req.body;
+    const { 
+      planId, 
+      serviceName, 
+      repoUrl, 
+      environmentNotes, 
+      additionalNotes,
+      email,
+      discordUsername,
+      runtime,
+      projectDescription,
+      expectedWorkload,
+      modMailRequired,
+      databaseRequired
+    } = req.body;
     const userId = req.user.id;
 
     if (!planId || !serviceName) {
@@ -54,10 +67,18 @@ exports.requestHosting = async (req, res) => {
     const plan = planRes.rows[0];
 
     const reqRes = await query(`
-      INSERT INTO hosting_requests (user_id, plan_id, service_name, repo_url, environment_notes, additional_notes, status)
-      VALUES ($1, $2, $3, $4, $5, $6, 'REQUESTED')
+      INSERT INTO hosting_requests (
+        user_id, plan_id, service_name, repo_url, environment_notes, additional_notes,
+        email, discord_username, runtime, project_description, expected_workload,
+        mod_mail_required, database_required, status
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'REQUESTED')
       RETURNING *
-    `, [userId, planId, serviceName, repoUrl || null, environmentNotes || null, additionalNotes || null]);
+    `, [
+      userId, planId, serviceName, repoUrl || null, environmentNotes || null, additionalNotes || null,
+      email || null, discordUsername || null, runtime || null, projectDescription || null, expectedWorkload || null,
+      modMailRequired || false, databaseRequired || false
+    ]);
 
     const hostingReq = reqRes.rows[0];
 
@@ -69,12 +90,17 @@ exports.requestHosting = async (req, res) => {
       ipAddress: req.ip,
     });
 
-    await notificationService.create(userId, {
-      type: 'HOSTING',
-      title: 'Hosting Request Submitted',
-      message: `Your hosting request for "${serviceName}" under plan ${plan.name} has been received and is under review.`,
-      link: '/client-dashboard/index.html',
-    });
+    try {
+      await notificationService.create(userId, {
+        type: 'HOSTING',
+        title: 'Hosting Request Submitted',
+        message: `Your hosting request for "${serviceName}" under plan ${plan.name} has been received and is under review.`,
+        link: '/client-dashboard/index.html',
+      });
+    } catch (notificationError) {
+      // Log notification error but don't fail the request
+      console.error('Notification service error:', notificationError);
+    }
 
     res.status(201).json({
       success: true,

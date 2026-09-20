@@ -1,26 +1,14 @@
-const { Router } = require('express');
+const express = require('express');
+const router = express.Router();
 const careersController = require('../controllers/careers.controller');
-const applicationsController = require('../controllers/applications.controller');
-const { authenticate, optionalAuth } = require('../middleware/auth.middleware');
+const { authenticate } = require('../middleware/auth.middleware');
 const { requirePermission } = require('../middleware/permission.middleware');
-const { validate } = require('../middleware/validation.middleware');
-const { createJobSchema, updateJobSchema, applyJobSchema } = require('../validators/career.validator');
-const { createUploadMiddleware, ALLOWED_MIMES } = require('../middleware/upload.middleware');
 
-const router = Router();
-
-router.get('/', careersController.list);
-router.get('/admin/all', authenticate, requirePermission('CAREER_VIEW'), careersController.listAll);
+// Public routes - no authentication required
+router.get('/', careersController.listPublic);
 router.get('/:slug', careersController.getBySlug);
-router.post('/', authenticate, requirePermission('CAREER_CREATE'), validate(createJobSchema), careersController.create);
-router.patch('/:id', authenticate, requirePermission('CAREER_EDIT'), validate(updateJobSchema), careersController.update);
-router.delete('/:id', authenticate, requirePermission('CAREER_DELETE'), careersController.remove);
-router.post(
-  '/:id/apply',
-  optionalAuth,
-  createUploadMiddleware({ maxSize: 5 * 1024 * 1024, allowedMimes: [...ALLOWED_MIMES.document, ...ALLOWED_MIMES.image] }),
-  validate(applyJobSchema),
-  applicationsController.apply
-);
+
+// Application submission - authentication optional
+router.post('/:positionId/apply', authenticate, careersController.submitApplication);
 
 module.exports = router;

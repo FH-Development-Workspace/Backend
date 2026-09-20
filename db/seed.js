@@ -1,6 +1,7 @@
 require('dotenv').config();
 const bcrypt = require('bcrypt');
 const { query, transaction, pool } = require('../src/config/database');
+const logger = require('../src/utils/logger');
 
 const ROLES = [
   { name: 'User', slug: 'user', description: 'Standard customer user', isSystem: true },
@@ -86,7 +87,7 @@ const HOSTING_PLANS = [
 ];
 
 async function seed() {
-  console.log('Seeding FH Development PostgreSQL Database...');
+  logger.info('Seeding FH Development PostgreSQL Database...');
 
   // 1. Roles
   for (const r of ROLES) {
@@ -166,7 +167,7 @@ async function seed() {
       `, [userId, superAdminRoleId]);
     }
 
-    console.log(`Admin user seeded: ${adminEmail}`);
+    logger.info(`Admin user seeded: ${adminEmail}`);
   }
 
   // 5. Company profile
@@ -184,11 +185,11 @@ async function seed() {
     ON CONFLICT DO NOTHING
   `);
 
-  console.log('Database seeding completed successfully.');
+  logger.info('Database seeding completed successfully.');
   await pool.end();
 }
 
 seed().catch(err => {
-  console.error('Seeding failed:', err);
+  logger.error('Seeding failed:', err);
   process.exit(1);
 });

@@ -2,20 +2,21 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { pool } = require('../src/config/database');
+const logger = require('../src/utils/logger');
 
 async function runMigrations() {
   const isReset = process.argv.includes('--reset');
 
   if (isReset) {
     if (process.env.NODE_ENV === 'production') {
-      console.error('CRITICAL: Database reset is NOT permitted in production!');
+      logger.error('CRITICAL: Database reset is NOT permitted in production!');
       process.exit(1);
     }
-    console.log('Resetting database schema...');
+    logger.info('Resetting database schema...');
     await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   }
 
-  console.log('Running database migrations...');
+  logger.info('Running database migrations...');
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -33,7 +34,7 @@ async function runMigrations() {
     const existing = await pool.query('SELECT filename FROM schema_migrations WHERE filename = $1', [file]);
 
     if (existing.rows.length === 0) {
-      console.log(`Executing migration: ${file}`);
+      logger.info(`Executing migration: ${file}`);
       let sql = fs.readFileSync(filePath, 'utf8');
       if (sql.charCodeAt(0) === 0xFEFF) {
         sql = sql.slice(1);
@@ -45,25 +46,25 @@ async function runMigrations() {
         await client.query(sql);
         await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
         await client.query('COMMIT');
-        console.log(`Successfully applied ${file}`);
+        logger.info(`Successfully applied ${file}`);
       } catch (err) {
         await client.query('ROLLBACK');
-        console.error(`Error in migration ${file}:`, err);
+        logger.error(`Error in migration ${file}:`, err);
         client.release();
         process.exit(1);
       } finally {
         client.release();
       }
     } else {
-      console.log(`Migration ${file} already applied.`);
+      logger.info(`Migration ${file} already applied.`);
     }
   }
 
-  console.log('All migrations completed successfully.');
+  logger.info('All migrations completed successfully.');
   await pool.end();
 }
 
 runMigrations().catch(err => {
-  console.error('Migration failed:', err);
+  logger.error('Migration failed:', err);
   process.exit(1);
 });

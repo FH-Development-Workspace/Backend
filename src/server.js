@@ -7,9 +7,7 @@ const logger = require('./utils/logger');
 
 const start = async () => {
   const connected = await connectDatabase();
-  if (connected) {
-    logger.info('Database connected');
-  } else {
+  if (!connected) {
     logger.error('Database connection failed — check DATABASE_URL');
     if (env.isProduction) {
       logger.warn('Starting without database — health check will report DOWN');
