@@ -12,6 +12,40 @@ const {
 
 const router = Router();
 
+// Informative GET handlers for browser discovery
+router.get('/login', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'FH Development Authentication Service',
+    description: 'Submit a POST request to this endpoint with JSON body { email, password } to authenticate.',
+    method: 'POST',
+    endpoint: '/api/v1/auth/login',
+    frontendLogin: 'https://fh-development.xyz/auth/login.html'
+  });
+});
+
+router.get('/register', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'FH Development Registration Service',
+    description: 'Submit a POST request to this endpoint with JSON body { username, email, password } to create an account.',
+    method: 'POST',
+    endpoint: '/api/v1/auth/register',
+    frontendRegister: 'https://fh-development.xyz/auth/register.html'
+  });
+});
+
+router.get('/forgot-password', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'FH Development Password Reset Service',
+    description: 'Submit a POST request with JSON body { email } to receive a password reset token.',
+    method: 'POST',
+    endpoint: '/api/v1/auth/forgot-password'
+  });
+});
+
+// Authentication endpoints
 router.post('/register', registerLimiter, validate(registerSchema), authController.register);
 router.post('/login', authLimiter, validate(loginSchema), authController.login);
 router.post('/logout', validate(refreshSchema), authController.logout);

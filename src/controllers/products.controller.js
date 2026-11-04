@@ -5,6 +5,7 @@ const analyticsService = require('../services/analytics.service');
 const { sendSuccess, sendPaginated } = require('../utils/response');
 const { getPagination, buildPaginationMeta } = require('../utils/pagination');
 const { AppError } = require('../middleware/error.middleware');
+const { FALLBACK_PRODUCTS } = require('../utils/fallbackData');
 
 const formatProduct = (p) => ({
   id: p.id,
@@ -73,6 +74,10 @@ const list = async (req, res, next) => {
     const formatted = itemsRes.rows.map(formatProduct);
     sendPaginated(res, formatted, buildPaginationMeta(page, limit, total));
   } catch (err) {
+    if (FALLBACK_PRODUCTS && FALLBACK_PRODUCTS.length > 0) {
+      const { page, limit } = getPagination(req.query);
+      return sendPaginated(res, FALLBACK_PRODUCTS, buildPaginationMeta(page, limit, FALLBACK_PRODUCTS.length));
+    }
     next(err);
   }
 };
@@ -86,7 +91,11 @@ const getBySlug = async (req, res, next) => {
       WHERE p.slug = $1
     `, [req.params.slug]);
 
-    if (!result.rows.length) throw new AppError('Product not found', 404, 'NOT_FOUND');
+    if (!result.rows.length) {
+      const fallback = FALLBACK_PRODUCTS.find(p => p.slug === req.params.slug);
+      if (fallback) return sendSuccess(res, { product: fallback });
+      throw new AppError('Product not found', 404, 'NOT_FOUND');
+    }
     const product = formatProduct(result.rows[0]);
 
     await analyticsService.logEvent('PRODUCT_VIEW', {
@@ -94,10 +103,12 @@ const getBySlug = async (req, res, next) => {
       resource: 'product',
       resourceId: product.id,
       ipAddress: req.ip,
-    });
+    }).catch(() => {});
 
     sendSuccess(res, { product });
   } catch (err) {
+    const fallback = FALLBACK_PRODUCTS.find(p => p.slug === req.params.slug);
+    if (fallback) return sendSuccess(res, { product: fallback });
     next(err);
   }
 };
