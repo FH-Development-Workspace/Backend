@@ -1,0 +1,64 @@
+services:
+  - type: web
+    name: fh-development-api
+    env: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: JWT_ACCESS_EXPIRES
+        value: 15m
+      - key: JWT_REFRESH_EXPIRES
+        value: 7d
+      - key: API_BASE_URL
+        value: https://backend.fh-development.xyz
+      - key: FRONTEND_URL
+        value: https://fh-development.xyz
+      - key: DASHBOARD_URL
+        value: https://dashboard.fh-development.xyz
+      - key: ALLOWED_ORIGINS
+        value: https://fh-development.xyz,https://www.fh-development.xyz,https://dashboard.fh-development.xyz
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: 465
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        value: no-reply@fh-development.xyz
+      - key: SMTP_FROM_NAME
+        value: FH Developments
+      - key: STORAGE_PROVIDER
+        value: cloudinary
+      - key: CLOUDINARY_URL
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: CLOUDINARY_FOLDER
+        value: fh-development
+      - key: VAULT_API_BASE_URL
+        value: https://api.vaultroblox.com
+      - key: VAULT_DEVELOPER_KEY
+        sync: false
+      - key: VAULT_ENABLED
+        value: "true"
