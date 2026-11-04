@@ -5,7 +5,7 @@ Full-stack production API providing identity, commerce, hosting requests, docume
 ## Architecture & Tech Stack
 
 - **Runtime**: Node.js (>=20.0.0) & Express.js
-- **Database**: PostgreSQL (`pg` connection pool with parameterized SQL queries)
+- **Database**: MySQL (`mysql2` connection pool with parameterized SQL queries)
 - **Authentication**: JWT Access & Refresh Tokens, bcrypt password hashing, role-based access control
 - **Storage**: Cloudinary & local disk storage abstraction
 - **Integrations**: SpaceMail SMTP, Roblox Vault API

@@ -87,15 +87,15 @@ const HOSTING_PLANS = [
 ];
 
 async function seed() {
-  logger.info('Seeding FH Development PostgreSQL Database...');
+  logger.info('Seeding FH Development MySQL Database...');
 
   // 1. Roles
   for (const r of ROLES) {
     await query(`
       INSERT INTO roles (name, slug, description, department, is_system)
-      VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (slug) DO UPDATE
-      SET name = EXCLUDED.name, description = EXCLUDED.description, department = EXCLUDED.department, updated_at = NOW()
+      VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+      name = VALUES(name), description = VALUES(description), department = VALUES(department), updated_at = NOW()
     `, [r.name, r.slug, r.description, r.department || null, r.isSystem]);
   }
 
@@ -105,8 +105,8 @@ async function seed() {
     const name = slug.replace(/_/g, ' ');
     await query(`
       INSERT INTO permissions (name, slug, resource, action)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (slug) DO NOTHING
+      VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE name = VALUES(name)
     `, [name, slug, res, act]);
   }
 
@@ -114,18 +114,18 @@ async function seed() {
   for (const plan of HOSTING_PLANS) {
     await query(`
       INSERT INTO hosting_plans (name, slug, price_gbp, ram_mb, cpu_percent, storage_gb, database_limit, backup_limit, mod_mail_available, recommended, description, active)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
-      ON CONFLICT (slug) DO UPDATE
-      SET price_gbp = EXCLUDED.price_gbp,
-          ram_mb = EXCLUDED.ram_mb,
-          cpu_percent = EXCLUDED.cpu_percent,
-          storage_gb = EXCLUDED.storage_gb,
-          database_limit = EXCLUDED.database_limit,
-          backup_limit = EXCLUDED.backup_limit,
-          mod_mail_available = EXCLUDED.mod_mail_available,
-          recommended = EXCLUDED.recommended,
-          description = EXCLUDED.description,
-          updated_at = NOW()
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      ON DUPLICATE KEY UPDATE
+      price_gbp = VALUES(price_gbp),
+      ram_mb = VALUES(ram_mb),
+      cpu_percent = VALUES(cpu_percent),
+      storage_gb = VALUES(storage_gb),
+      database_limit = VALUES(database_limit),
+      backup_limit = VALUES(backup_limit),
+      mod_mail_available = VALUES(mod_mail_available),
+      recommended = VALUES(recommended),
+      description = VALUES(description),
+      updated_at = NOW()
     `, [
       plan.name, plan.slug, plan.priceGBP, plan.ramMB, plan.cpuPercent, plan.storageGB,
       plan.databaseLimit, plan.backupLimit, plan.modMailAvailable, plan.recommended, plan.description
@@ -133,27 +133,26 @@ async function seed() {
   }
 
   // 4. Seed Admin user if environment variables set
-  const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@fh-development.xyz';
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'AdminPass123!';
+  const adminEmail = process.env.SEED_ADMIN_EMAIL;
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
   const adminUsername = process.env.SEED_ADMIN_USERNAME || 'admin';
 
   if (adminEmail && adminPassword) {
     const hash = await bcrypt.hash(adminPassword, 12);
     const userRes = await query(`
       INSERT INTO users (username, email, password_hash, email_verified, status)
-      VALUES ($1, $2, $3, true, 'ACTIVE')
-      ON CONFLICT (email) DO UPDATE
-      SET password_hash = EXCLUDED.password_hash, status = 'ACTIVE', email_verified = true, updated_at = NOW()
-      RETURNING id
+      VALUES (?, ?, ?, 1, 'ACTIVE')
+      ON DUPLICATE KEY UPDATE
+      password_hash = VALUES(password_hash), status = 'ACTIVE', email_verified = 1, updated_at = NOW()
     `, [adminUsername, adminEmail, hash]);
 
-    const userId = userRes.rows[0].id;
+    const userId = userRes.rows[0]?.id || userRes.insertId;
 
     // Profile
     await query(`
       INSERT INTO profiles (user_id, display_name, first_name, last_name)
-      VALUES ($1, 'System Administrator', 'Admin', 'User')
-      ON CONFLICT (user_id) DO NOTHING
+      VALUES (?, 'System Administrator', 'Admin', 'User')
+      ON DUPLICATE KEY UPDATE display_name = VALUES(display_name)
     `, [userId]);
 
     // Role
@@ -162,12 +161,14 @@ async function seed() {
       const superAdminRoleId = roleRes.rows[0].id;
       await query(`
         INSERT INTO user_roles (user_id, role_id)
-        VALUES ($1, $2)
-        ON CONFLICT (user_id, role_id) DO NOTHING
+        VALUES (?, ?)
+        ON DUPLICATE KEY UPDATE role_id = VALUES(role_id)
       `, [userId, superAdminRoleId]);
     }
 
     logger.info(`Admin user seeded: ${adminEmail}`);
+  } else {
+    logger.warn('SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD not set - skipping admin user creation');
   }
 
   // 5. Company profile
@@ -182,7 +183,7 @@ async function seed() {
       'To create dependable digital products that help people build, connect and grow.',
       'A more capable and connected future for creators and communities.'
     )
-    ON CONFLICT DO NOTHING
+    ON DUPLICATE KEY UPDATE name = VALUES(name)
   `);
 
   logger.info('Database seeding completed successfully.');

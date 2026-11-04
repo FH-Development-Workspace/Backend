@@ -1,59 +1,70 @@
-const { Pool } = require('pg');
+const mysql = require('mysql2/promise');
 const env = require('./environment');
 const logger = require('../utils/logger');
 
-const sslConfig = (() => {
-  if (!env.databaseUrl) return false;
-  if (env.databaseUrl.includes('sslmode=disable')) return false;
-  // Neon and other cloud providers require SSL
-  if (env.databaseUrl.includes('neon.tech') ||
-      env.databaseUrl.includes('render.com') ||
-      env.databaseUrl.includes('supabase') ||
-      env.databaseUrl.includes('sslmode=require') ||
-      env.databaseUrl.includes('sslmode=verify-full') ||
-      env.isProduction) {
-    return { rejectUnauthorized: false };
+// Parse MySQL connection string or use individual env vars
+const getConnectionConfig = () => {
+  if (env.databaseUrl) {
+    // Parse connection string: mysql://user:pass@host:port/database
+    const match = env.databaseUrl.match(/mysql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/);
+    if (match) {
+      return {
+        host: match[3],
+        port: parseInt(match[4]),
+        user: match[1],
+        password: match[2],
+        database: match[5],
+        waitForConnections: true,
+        connectionLimit: 10,
+        queueLimit: 0,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 10000,
+      };
+    }
   }
-  // Explicitly use verify-full for compatibility with future pg versions
-  if (env.databaseUrl.includes('sslmode=prefer') || 
-      env.databaseUrl.includes('sslmode=require') ||
-      env.databaseUrl.includes('sslmode=verify-ca')) {
-    return { rejectUnauthorized: false };
-  }
-  return false;
-})();
 
-const pool = new Pool({
-  connectionString: env.databaseUrl,
-  ssl: sslConfig,
-  max: 10,
-  min: 1,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 15000,
-  statement_timeout: 60000,
-  query_timeout: 60000,
-  keepAlive: true,
-  keepAliveInitialDelayMillis: 10000,
-  allowExitOnIdle: false,
+  // Fallback to individual env vars
+  return {
+    host: process.env.DB_HOST || 'localhost',
+    port: parseInt(process.env.DB_PORT || '3306'),
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'fh_development',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
+  };
+};
+
+const pool = mysql.createPool(getConnectionConfig());
+
+pool.on('connection', (connection) => {
+  if (env.isDevelopment) logger.debug('New MySQL connection established');
+});
+
+pool.on('acquire', (connection) => {
+  if (env.isDevelopment) logger.debug('Connection acquired from pool');
+});
+
+pool.on('release', (connection) => {
+  if (env.isDevelopment) logger.debug('Connection released to pool');
 });
 
 pool.on('error', (err) => {
-  logger.error('PostgreSQL pool error', { message: err.message });
-});
-
-pool.on('connect', () => {
-  if (env.isDevelopment) logger.debug('New PostgreSQL client connected');
+  logger.error('MySQL pool error', { message: err.message });
 });
 
 const connectDatabase = async () => {
   try {
-    const client = await pool.connect();
-    await client.query('SELECT 1');
-    client.release();
-    logger.info('Database connected');
+    const connection = await pool.getConnection();
+    await connection.ping();
+    connection.release();
+    logger.info('MySQL database connected');
     return true;
   } catch (err) {
-    logger.error('Database connection failed', { message: err.message });
+    logger.error('MySQL database connection failed', { message: err.message });
     return false;
   }
 };
@@ -61,33 +72,34 @@ const connectDatabase = async () => {
 const disconnectDatabase = async () => {
   try {
     await pool.end();
-    logger.info('Database pool closed');
+    logger.info('MySQL pool closed');
   } catch (err) {
-    logger.error('Error closing database pool', { message: err.message });
+    logger.error('Error closing MySQL pool', { message: err.message });
   }
 };
 
 /**
- * Execute a parameterized query with automatic retry on ETIMEDOUT.
+ * Execute a parameterized query with automatic retry on connection errors.
  * @param {string} text - SQL query string
  * @param {Array} params - Query parameters
  * @param {number} retries - Number of retries on connection errors
  */
-const query = async (text, params, retries = 1) => {
+const query = async (text, params = [], retries = 1) => {
   const start = Date.now();
   try {
-    const result = await pool.query(text, params);
+    const [rows] = await pool.execute(text, params);
     if (env.isDevelopment) {
       logger.debug('DB query', {
         text: text.substring(0, 80).replace(/\s+/g, ' ').trim(),
         duration: Date.now() - start,
-        rows: result.rowCount,
+        rows: rows.length,
       });
     }
-    return result;
+    return { rows, rowCount: rows.length };
   } catch (err) {
     const isConnectionError = err.code === 'ETIMEDOUT' || err.code === 'ECONNRESET' ||
-      err.code === 'ECONNREFUSED' || err.message?.includes('Connection terminated') ||
+      err.code === 'ECONNREFUSED' || err.code === 'PROTOCOL_CONNECTION_LOST' ||
+      err.message?.includes('Connection lost') ||
       err.message?.includes('connect ETIMEDOUT');
 
     if (isConnectionError && retries > 0) {
@@ -106,20 +118,20 @@ const query = async (text, params, retries = 1) => {
 
 /**
  * Execute multiple queries in a transaction.
- * @param {Function} callback - async fn(client) => result
+ * @param {Function} callback - async fn(connection) => result
  */
 const transaction = async (callback) => {
-  const client = await pool.connect();
+  const connection = await pool.getConnection();
   try {
-    await client.query('BEGIN');
-    const result = await callback(client);
-    await client.query('COMMIT');
+    await connection.beginTransaction();
+    const result = await callback(connection);
+    await connection.commit();
     return result;
   } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
+    try { await connection.rollback(); } catch (_) {}
     throw err;
   } finally {
-    client.release();
+    connection.release();
   }
 };
 

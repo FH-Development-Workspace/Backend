@@ -2,7 +2,7 @@
   "name": "fh-development-api",
   "version": "1.0.0",
   "description": "FH Development central backend API platform",
-  "main": "src/server.js",
+  "main": "server.js",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -45,8 +45,8 @@
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.11.0",
     "multer": "^2.2.0",
+    "mysql2": "^3.11.5",
     "nodemailer": "^9.0.5",
-    "pg": "^8.13.3",
     "slugify": "^1.6.9",
     "socket.io": "^4.8.1",
     "swagger-ui-express": "^5.0.1",

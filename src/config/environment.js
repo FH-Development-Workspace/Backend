@@ -3,8 +3,15 @@ require('dotenv').config();
 const DEFAULT_ORIGINS = [
   'https://fh-development.xyz',
   'https://www.fh-development.xyz',
+  'https://fh-development-workspace.github.io',
+  'https://fh-development-workspace.github.io/Frontend',
+  'https://fh-development-workspace.github.io/Dashboards',
+  'https://fh-development-workspace.github.io/Legal_Website',
   'https://dashboard.fh-development.xyz',
   'https://dashboard.fh-developments.xyz',
+  'https://admin-dashboard.fh-development.xyz',
+  'https://staff-dashboard.fh-development.xyz',
+  'https://client-dashboard.fh-development.xyz',
   'https://backend.fh-development.xyz',
   'https://api.fh-development.xyz',
   'http://localhost:3000',
@@ -39,9 +46,6 @@ const resolveApiBaseUrl = () => {
   return 'https://backend.fh-development.xyz';
 };
 
-// Safe default Neon connection string if container env is missing DATABASE_URL
-const DEFAULT_NEON_DATABASE_URL = "postgresql://neondb_owner:npg_2vnH5pJNRebm@ep-delicate-scene-ay7qgfnz-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require";
-
 const env = {
   nodeEnv,
   port: parseInt(process.env.PORT, 10) || 5000,
@@ -50,8 +54,8 @@ const env = {
   isTest: nodeEnv === 'test',
   isRender,
 
-  databaseUrl: process.env.DATABASE_URL || DEFAULT_NEON_DATABASE_URL,
-  directDatabaseUrl: process.env.DIRECT_URL || process.env.DATABASE_URL || DEFAULT_NEON_DATABASE_URL,
+  databaseUrl: process.env.DATABASE_URL,
+  directDatabaseUrl: process.env.DIRECT_URL || process.env.DATABASE_URL,
 
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET || 'fh-dev-access-7k9m2p4q8r1s5t0u3v6w9x2y5z8a1b4c7d0e3f6g9h2j5k8',
