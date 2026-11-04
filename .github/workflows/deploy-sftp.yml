@@ -1,0 +1,46 @@
+name: Deploy Backend via SFTP
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-sftp:
+    name: Deploy to Arlo Studios Node (SFTP)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: SFTP Deploy to Pterodactyl Node
+        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
+        with:
+          server: ${{ secrets.SFTP_HOST || 'node.arlostudios.dev' }}
+          port: ${{ secrets.SFTP_PORT || '2022' }}
+          username: ${{ secrets.SFTP_USER || 'hybridzdynamics.a4f6e130' }}
+          password: ${{ secrets.SFTP_PASSWORD }}
+          local_path: './*'
+          remote_path: '/'
+          sftp_only: true
+          delete_remote_files: false
+          sftpArgs: '-o ConnectTimeout=30'
+          exclude: |
+            .git*
+            .git*/**
+            tests/**
+            coverage/**
+            .github/**
+            node_modules/**
+            uploads/**
+            render.yaml
+            *.log
+            .env.example

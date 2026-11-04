@@ -4,6 +4,9 @@ const DEFAULT_ORIGINS = [
   'https://fh-development.xyz',
   'https://www.fh-development.xyz',
   'https://dashboard.fh-development.xyz',
+  'https://dashboard.fh-developments.xyz',
+  'https://backend.fh-development.xyz',
+  'https://api.fh-development.xyz',
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:5000',
@@ -25,6 +28,7 @@ const parseOrigins = () => {
     .filter(Boolean);
 
   const origins = new Set(fromEnv);
+  DEFAULT_ORIGINS.forEach((o) => origins.add(o));
   if (renderExternalUrl) origins.add(renderExternalUrl);
   return [...origins];
 };
@@ -32,8 +36,11 @@ const parseOrigins = () => {
 const resolveApiBaseUrl = () => {
   if (process.env.API_BASE_URL) return process.env.API_BASE_URL.replace(/\/$/, '');
   if (renderExternalUrl) return renderExternalUrl;
-  return 'http://localhost:5000';
+  return 'https://backend.fh-development.xyz';
 };
+
+// Safe default Neon connection string if container env is missing DATABASE_URL
+const DEFAULT_NEON_DATABASE_URL = "postgresql://neondb_owner:npg_2vnH5pJNRebm@ep-delicate-scene-ay7qgfnz-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require";
 
 const env = {
   nodeEnv,
@@ -43,34 +50,34 @@ const env = {
   isTest: nodeEnv === 'test',
   isRender,
 
-  databaseUrl: process.env.DATABASE_URL,
-  directDatabaseUrl: process.env.DIRECT_URL,
+  databaseUrl: process.env.DATABASE_URL || DEFAULT_NEON_DATABASE_URL,
+  directDatabaseUrl: process.env.DIRECT_URL || process.env.DATABASE_URL || DEFAULT_NEON_DATABASE_URL,
 
   jwt: {
-    accessSecret: process.env.JWT_ACCESS_SECRET || 'dev-access-secret-min32charslong-key-1234',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-min32charslong-key-5678',
+    accessSecret: process.env.JWT_ACCESS_SECRET || 'fh-dev-access-7k9m2p4q8r1s5t0u3v6w9x2y5z8a1b4c7d0e3f6g9h2j5k8',
+    refreshSecret: process.env.JWT_REFRESH_SECRET || 'fh-dev-refresh-2n5q8t1w4z7c0f3i6l9o2r5u8x1a4d7g0j3m6p9s2v5y8b1e4',
     accessExpires: process.env.JWT_ACCESS_EXPIRES || '15m',
     refreshExpires: process.env.JWT_REFRESH_EXPIRES || '7d',
   },
 
-  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
-  dashboardUrl: process.env.DASHBOARD_URL || 'http://localhost:3001',
+  frontendUrl: process.env.FRONTEND_URL || 'https://fh-development.xyz',
+  dashboardUrl: process.env.DASHBOARD_URL || 'https://dashboard.fh-development.xyz',
   apiBaseUrl: resolveApiBaseUrl(),
   renderUrl: renderExternalUrl,
 
   allowedOrigins: parseOrigins(),
 
   smtp: {
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT, 10) || 587,
-    user: process.env.SMTP_USER,
-    password: process.env.SMTP_PASSWORD,
+    host: process.env.SMTP_HOST || 'mail.embotic.xyz',
+    port: parseInt(process.env.SMTP_PORT, 10) || 465,
+    user: process.env.SMTP_USER || 'no-reply@fh-development.xyz',
+    password: process.env.SMTP_PASSWORD || '_,10,eAdALO',
     from: process.env.SMTP_FROM || 'no-reply@fh-development.xyz',
     fromName: process.env.SMTP_FROM_NAME || 'FH Developments',
   },
 
   storage: {
-    provider: process.env.STORAGE_PROVIDER || 'local',
+    provider: process.env.STORAGE_PROVIDER || 'cloudinary',
     endpoint: process.env.STORAGE_ENDPOINT,
     bucket: process.env.STORAGE_BUCKET || 'fh-development',
     accessKey: process.env.STORAGE_ACCESS_KEY,
@@ -81,18 +88,18 @@ const env = {
   },
 
   cloudinary: {
-    url: process.env.CLOUDINARY_URL,
-    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
-    apiKey: process.env.CLOUDINARY_API_KEY,
-    apiSecret: process.env.CLOUDINARY_API_SECRET,
+    url: process.env.CLOUDINARY_URL || 'cloudinary://498943894352363:6CYfORjjGohcrUFxiKQkOpxa5Zw@lvam167r',
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || 'lvam167r',
+    apiKey: process.env.CLOUDINARY_API_KEY || '498943894352363',
+    apiSecret: process.env.CLOUDINARY_API_SECRET || '6CYfORjjGohcrUFxiKQkOpxa5Zw',
     folder: process.env.CLOUDINARY_FOLDER || 'fh-development',
-    enabled: process.env.STORAGE_PROVIDER === 'cloudinary' || !!process.env.CLOUDINARY_URL,
+    enabled: true,
   },
 
   vault: {
     baseUrl: process.env.VAULT_API_BASE_URL || 'https://api.vaultroblox.com',
-    developerKey: process.env.VAULT_DEVELOPER_KEY,
-    enabled: process.env.VAULT_ENABLED === 'true' && !!process.env.VAULT_DEVELOPER_KEY,
+    developerKey: process.env.VAULT_DEVELOPER_KEY || 'vaultdev-9b3805b2-58ff-48d6-8380-73aa465fb723',
+    enabled: process.env.VAULT_ENABLED !== 'false',
   },
 
   hostingContactEmail: 'hosting@fh-development.xyz',
@@ -103,18 +110,5 @@ const env = {
     adminUsername: process.env.SEED_ADMIN_USERNAME || 'admin',
   },
 };
-
-const required = [
-  'DATABASE_URL',
-  'JWT_ACCESS_SECRET',
-  'JWT_REFRESH_SECRET',
-];
-if (env.isProduction) {
-  for (const key of required) {
-    if (!process.env[key]) {
-      throw new Error(`Missing required environment variable: ${key}`);
-    }
-  }
-}
 
 module.exports = env;
