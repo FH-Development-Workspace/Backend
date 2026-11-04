@@ -24,9 +24,9 @@ jobs:
       - name: SFTP Deploy to Pterodactyl Node
         uses: wlixcc/SFTP-Deploy-Action@v1.2.4
         with:
-          server: ${{ secrets.SFTP_HOST || 'node.arlostudios.dev' }}
-          port: ${{ secrets.SFTP_PORT || '2022' }}
-          username: ${{ secrets.SFTP_USER || 'hybridzdynamics.a4f6e130' }}
+          server: ${{ secrets.SFTP_HOST }}
+          port: ${{ secrets.SFTP_PORT }}
+          username: ${{ secrets.SFTP_USER }}
           password: ${{ secrets.SFTP_PASSWORD }}
           local_path: './*'
           remote_path: '/'
