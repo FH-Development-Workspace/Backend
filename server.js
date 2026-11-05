@@ -1,9 +1,9 @@
 require('dotenv').config();
 
-const app = require('./app');
-const env = require('./config/environment');
-const { connectDatabase, disconnectDatabase } = require('./config/database');
-const logger = require('./utils/logger');
+const app = require('./src/app');
+const env = require('./src/config/environment');
+const { connectDatabase, disconnectDatabase } = require('./src/config/database');
+const logger = require('./src/utils/logger');
 
 const start = async () => {
   const connected = await connectDatabase();

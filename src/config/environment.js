@@ -58,8 +58,8 @@ const env = {
   directDatabaseUrl: process.env.DIRECT_URL || process.env.DATABASE_URL,
 
   jwt: {
-    accessSecret: process.env.JWT_ACCESS_SECRET || 'fh-dev-access-7k9m2p4q8r1s5t0u3v6w9x2y5z8a1b4c7d0e3f6g9h2j5k8',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'fh-dev-refresh-2n5q8t1w4z7c0f3i6l9o2r5u8x1a4d7g0j3m6p9s2v5y8b1e4',
+    accessSecret: process.env.JWT_ACCESS_SECRET,
+    refreshSecret: process.env.JWT_REFRESH_SECRET,
     accessExpires: process.env.JWT_ACCESS_EXPIRES || '15m',
     refreshExpires: process.env.JWT_REFRESH_EXPIRES || '7d',
   },
@@ -72,10 +72,10 @@ const env = {
   allowedOrigins: parseOrigins(),
 
   smtp: {
-    host: process.env.SMTP_HOST || 'mail.embotic.xyz',
-    port: parseInt(process.env.SMTP_PORT, 10) || 465,
-    user: process.env.SMTP_USER || 'no-reply@fh-development.xyz',
-    password: process.env.SMTP_PASSWORD || '_,10,eAdALO',
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT, 10) || 587,
+    user: process.env.SMTP_USER,
+    password: process.env.SMTP_PASSWORD,
     from: process.env.SMTP_FROM || 'no-reply@fh-development.xyz',
     fromName: process.env.SMTP_FROM_NAME || 'FH Developments',
   },
@@ -92,18 +92,18 @@ const env = {
   },
 
   cloudinary: {
-    url: process.env.CLOUDINARY_URL || 'cloudinary://498943894352363:6CYfORjjGohcrUFxiKQkOpxa5Zw@lvam167r',
-    cloudName: process.env.CLOUDINARY_CLOUD_NAME || 'lvam167r',
-    apiKey: process.env.CLOUDINARY_API_KEY || '498943894352363',
-    apiSecret: process.env.CLOUDINARY_API_SECRET || '6CYfORjjGohcrUFxiKQkOpxa5Zw',
+    url: process.env.CLOUDINARY_URL,
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    apiSecret: process.env.CLOUDINARY_API_SECRET,
     folder: process.env.CLOUDINARY_FOLDER || 'fh-development',
-    enabled: true,
+    enabled: !!process.env.CLOUDINARY_URL,
   },
 
   vault: {
     baseUrl: process.env.VAULT_API_BASE_URL || 'https://api.vaultroblox.com',
-    developerKey: process.env.VAULT_DEVELOPER_KEY || 'vaultdev-9b3805b2-58ff-48d6-8380-73aa465fb723',
-    enabled: process.env.VAULT_ENABLED !== 'false',
+    developerKey: process.env.VAULT_DEVELOPER_KEY,
+    enabled: process.env.VAULT_ENABLED === 'true' && !!process.env.VAULT_DEVELOPER_KEY,
   },
 
   hostingContactEmail: 'hosting@fh-development.xyz',

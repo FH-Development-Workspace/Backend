@@ -8,13 +8,16 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      # Server Configuration
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 5000
+      - key: RENDER
+        value: "true"
+
+      # Database Configuration (MySQL)
       - key: DATABASE_URL
-        sync: false
-      - key: DIRECT_URL
         sync: false
       - key: DB_HOST
         sync: false
@@ -26,6 +29,8 @@ services:
         sync: false
       - key: DB_NAME
         sync: false
+
+      # Security & Authentication (REQUIRED)
       - key: JWT_ACCESS_SECRET
         sync: false
       - key: JWT_REFRESH_SECRET
@@ -34,14 +39,20 @@ services:
         value: 15m
       - key: JWT_REFRESH_EXPIRES
         value: 7d
+
+      # API URLs
       - key: API_BASE_URL
         value: https://api.fh-development.xyz
       - key: FRONTEND_URL
         value: https://fh-development.xyz
       - key: DASHBOARD_URL
         value: https://dashboard.fh-development.xyz
+
+      # CORS Configuration
       - key: ALLOWED_ORIGINS
-        value: https://fh-development.xyz,https://www.fh-development.xyz,https://dashboard.fh-development.xyz,https://fh-development-workspace.github.io,https://fh-development-workspace.github.io/Frontend,https://fh-development-workspace.github.io/Dashboards,https://fh-development-workspace.github.io/Legal_Website
+        value: https://fh-development.xyz,https://www.fh-development.xyz,https://dashboard.fh-development.xyz,https://dashboard.fh-developments.xyz,https://admin-dashboard.fh-development.xyz,https://staff-dashboard.fh-development.xyz,https://client-dashboard.fh-development.xyz,https://fh-development-workspace.github.io,https://fh-development-workspace.github.io/Frontend,https://fh-development-workspace.github.io/Dashboards,https://fh-development-workspace.github.io/Legal_Website
+
+      # Email Configuration (SMTP)
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
@@ -54,8 +65,12 @@ services:
         value: no-reply@fh-development.xyz
       - key: SMTP_FROM_NAME
         value: FH Developments
+
+      # File Storage Configuration
       - key: STORAGE_PROVIDER
         value: cloudinary
+      - key: STORAGE_LOCAL_PATH
+        value: ./uploads
       - key: CLOUDINARY_URL
         sync: false
       - key: CLOUDINARY_CLOUD_NAME
@@ -66,15 +81,31 @@ services:
         sync: false
       - key: CLOUDINARY_FOLDER
         value: fh-development
+
+      # Roblox Vault Integration (Optional)
       - key: VAULT_API_BASE_URL
         value: https://api.vaultroblox.com
       - key: VAULT_DEVELOPER_KEY
         sync: false
       - key: VAULT_ENABLED
         value: "false"
+
+      # Database Seeding
       - key: SEED_ADMIN_EMAIL
         sync: false
       - key: SEED_ADMIN_PASSWORD
         sync: false
       - key: SEED_ADMIN_USERNAME
         value: admin
+
+      # Rate Limiting
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: 100
+
+      # Upload Configuration
+      - key: MAX_FILE_SIZE
+        value: 10485760
+      - key: ALLOWED_FILE_TYPES
+        value: image/jpeg,image/png,image/gif,image/webp,application/pdf
